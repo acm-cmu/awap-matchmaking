@@ -16,7 +16,7 @@ This project uses python3 and virtualenv to manage a separate python environment
 4. Install requirements of this project
 `pip install -r requirements.txt`
 
-5. (Development) Install pre-commit
+5. (Development) Install pre-commit message
 `pre-commit install`
 
 To deactivate the virtualenv, just use `deactivate`.
