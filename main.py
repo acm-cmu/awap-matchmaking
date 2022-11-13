@@ -3,6 +3,7 @@ from typing import Union
 from fastapi import FastAPI
 from pydantic import BaseModel
 from match_runner import MatchRunner
+import boto3
 
 app = FastAPI()
 
@@ -30,6 +31,27 @@ class Tournament(BaseModel):
     name: str
     user_submissions: list[UserSubmission]
     game_engine_name: str
+
+
+@app.on_event("startup")
+def init_game_engine():
+    # TODO: setup initial game engine?
+    pass
+
+@app.on_event("startup")
+def connect_to_s3():
+    # TODO: move these into a .env file :)
+    _client_key = ""
+    _client_secret = ""
+    _s3_bucket = "awap-test-bucket"
+
+    s3 = boto3.resource(
+        service_name="s3",
+        region_name="us-east-1",
+        aws_access_key_id=_client_key,
+        aws_secret_access_key=_client_secret
+    )
+    app.bucket = s3.Bucket(_s3_bucket)
 
 
 @app.get("/")
@@ -67,7 +89,16 @@ def run_single_match(match: Match):
     Returns the if the match is successfully added to the queue, as well as the match id.
     """
 
-    raise NotImplementedError
+    # perform checks and validate arguments
+    # TODO: check if engine exists and matches, check if engine uses num_players for each match
+    # TODO: standardize error format?
+    if match.num_players != len(match.user_submissions):
+        return {"errno": 400, "msg": "number of users should match submissions"}
+
+    # run the match (TODO: set match config)
+    currMatch = MatchRunner(match, {}, app.bucket)
+    return currMatch.sendJob()
+    
 
 
 @app.post("/tournament/")
