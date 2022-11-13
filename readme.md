@@ -25,6 +25,10 @@ To deactivate the virtualenv, just use `deactivate`.
 
 This project uses [FastAPI](https://fastapi.tiangolo.com/).
 
+Install required modules:
+
+pip3 install -r ./requirements.txt
+
 To run the server, run the following command in the root directory
 
 `uvicorn main:app --reload`
