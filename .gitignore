@@ -51,3 +51,6 @@ docs/_build/
 
 # Environment variables
 .env
+
+# Virtual environment
+venv/
