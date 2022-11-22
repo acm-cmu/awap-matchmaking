@@ -1,5 +1,5 @@
 import os
-from typing import Union
+from typing import Optional, Union
 
 from fastapi import FastAPI, HTTPException, Response, status
 from pydantic import BaseModel, BaseSettings
@@ -7,21 +7,9 @@ import boto3
 from dotenv import load_dotenv
 from game_engine import GameEngine, setup_game_engine
 
-from match_runner import MatchRunner
+from match_runner import Match, MatchRunner, UserSubmission
 
 DATA_DIR = "data"
-
-
-class UserSubmission(BaseModel):
-    username: str
-    remote_location: str
-    remote_directory: str
-
-
-class Match(BaseModel):
-    game_engine_name: str
-    num_players: int
-    user_submissions: list[UserSubmission]
 
 
 class Tournament(BaseModel):
@@ -30,16 +18,13 @@ class Tournament(BaseModel):
     game_engine_name: str
 
 
-class App(FastAPI):
-    game_engine: GameEngine
+class API(FastAPI):
+    engine: Optional[GameEngine] = None
     dotenv_loaded: bool = False
-
-    s3 = None
-    bucket_bot = None
-    bucket_replays = None
+    s3_resource = None
 
 
-app = App()
+app = API()
 
 
 @app.on_event("startup")
@@ -60,7 +45,7 @@ def connect_to_s3():
     _client_key = os.environ["AWS_CLIENT_KEY"]
     _client_secret = os.environ["AWS_CLIENT_SECRET"]
 
-    app.s3 = boto3.resource(
+    app.s3_resource = boto3.client(
         service_name="s3",
         region_name="us-east-1",
         aws_access_key_id=_client_key,
@@ -74,23 +59,24 @@ def read_root():
 
 
 @app.post("/game_engine")
-def set_game_engine(game_engine: GameEngine):
+def set_game_engine(new_engine: GameEngine):
     """
     This endpoint is used to set the game engine to be used for matches,
     and the number of players in the match. It replaces currently set game engine
     """
     try:
-        setup_game_engine(game_engine, DATA_DIR)
-        app.game_engine = game_engine
-        return {"status": f"Game engine set to {game_engine.game_engine_name}"}
+        setup_game_engine(new_engine, DATA_DIR)
+        app.engine = new_engine
     except ConnectionError as exc:
         raise HTTPException(
-            status_code=404, detail=f"Could not download game engine: {str(exc)}"
+            status_code=400, detail=f"Could not download game engine: {str(exc)}"
         ) from exc
     except OSError as exc:
         raise HTTPException(
-            status_code=404, detail=f"Could not save engine: {str(exc)}"
+            status_code=500, detail=f"Could not save engine: {str(exc)}"
         ) from exc
+
+    return {"status": f"Game engine set to {app.engine.game_engine_name}"}
 
 
 @app.post("/match/")
@@ -113,15 +99,26 @@ def run_single_match(match: Match):
 
     Returns the if the match is successfully added to the queue, as well as the match id.
     """
+    if app.engine is None:
+        raise HTTPException(status_code=400, detail="Game engine not set yet")
 
-    # perform checks and validate arguments
-    # TODO: check if engine exists and matches, check if engine uses num_players for each match
-    # TODO: standardize error format?
+    if match.game_engine_name != app.engine.game_engine_name:
+        raise HTTPException(status_code=400, detail="Incompatible game engine")
+
+    if len(match.user_submissions) != app.engine.num_players:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected {app.engine.num_players} players,"
+            f"received only f{len(match.user_submissions)}",
+        )
+
     if match.num_players != len(match.user_submissions):
-        return {"errno": 400, "msg": "number of users should match submissions"}
+        raise HTTPException(
+            status_code=400, detail="Number of users should match number of submissions"
+        )
 
     # run the match (TODO: set match config)
-    currMatch = MatchRunner(match, {}, app.bucket)
+    currMatch = MatchRunner(match, {}, app.s3_resource)
     return currMatch.sendJob()
 
 
