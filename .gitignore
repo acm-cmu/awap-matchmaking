@@ -49,8 +49,10 @@ coverage.xml
 # Sphinx documentation
 docs/_build/
 
-# Environment variables
-.env
-
 # Virtual environment
 venv/
+.env
+.ipynb_checkpoints/
+
+# Local
+data/

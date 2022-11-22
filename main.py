@@ -1,30 +1,15 @@
-from typing import Union
+import os
+from typing import Optional, Union
 
-from fastapi import FastAPI
-from pydantic import BaseModel
-from match_runner import MatchRunner
+from fastapi import FastAPI, HTTPException, Response, status
+from pydantic import BaseModel, BaseSettings
 import boto3
+from dotenv import load_dotenv
+from game_engine import GameEngine, setup_game_engine
 
-app = FastAPI()
+from match_runner import Match, MatchRunner, UserSubmission
 
-
-class UserSubmission(BaseModel):
-    username: str
-    remote_location: str
-    remote_directory: str
-
-
-class Match(BaseModel):
-    game_engine_name: str
-    num_players: int
-    user_submissions: list[UserSubmission]
-
-
-class GameEngine(BaseModel):
-    game_engine_name: str
-    remote_location: str
-    remote_directory: str
-    num_players: int
+DATA_DIR = "data"
 
 
 class Tournament(BaseModel):
@@ -33,25 +18,39 @@ class Tournament(BaseModel):
     game_engine_name: str
 
 
+class API(FastAPI):
+    engine: Optional[GameEngine] = None
+    dotenv_loaded: bool = False
+    s3_resource = None
+
+
+app = API()
+
+
+@app.on_event("startup")
+def load_env():
+    if not app.dotenv_loaded:
+        app.dotenv_loaded = True
+        load_dotenv()
+
+
 @app.on_event("startup")
 def init_game_engine():
-    # TODO: setup initial game engine?
-    pass
+    os.makedirs(DATA_DIR, exist_ok=True)
+
 
 @app.on_event("startup")
 def connect_to_s3():
-    # TODO: move these into a .env file :)
-    _client_key = ""
-    _client_secret = ""
-    _s3_bucket = "awap-test-bucket"
+    load_env()
+    _client_key = os.environ["AWS_CLIENT_KEY"]
+    _client_secret = os.environ["AWS_CLIENT_SECRET"]
 
-    s3 = boto3.resource(
+    app.s3_resource = boto3.client(
         service_name="s3",
         region_name="us-east-1",
         aws_access_key_id=_client_key,
-        aws_secret_access_key=_client_secret
+        aws_secret_access_key=_client_secret,
     )
-    app.bucket = s3.Bucket(_s3_bucket)
 
 
 @app.get("/")
@@ -60,12 +59,24 @@ def read_root():
 
 
 @app.post("/game_engine")
-def set_game_engine(game_engine: GameEngine):
+def set_game_engine(new_engine: GameEngine):
     """
     This endpoint is used to set the game engine to be used for matches,
     and the number of players in the match. It replaces currently set game engine
     """
-    raise NotImplementedError
+    try:
+        setup_game_engine(new_engine, DATA_DIR)
+        app.engine = new_engine
+    except ConnectionError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Could not download game engine: {str(exc)}"
+        ) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Could not save engine: {str(exc)}"
+        ) from exc
+
+    return {"status": f"Game engine set to {app.engine.game_engine_name}"}
 
 
 @app.post("/match/")
@@ -88,17 +99,27 @@ def run_single_match(match: Match):
 
     Returns the if the match is successfully added to the queue, as well as the match id.
     """
+    if app.engine is None:
+        raise HTTPException(status_code=400, detail="Game engine not set yet")
 
-    # perform checks and validate arguments
-    # TODO: check if engine exists and matches, check if engine uses num_players for each match
-    # TODO: standardize error format?
+    if match.game_engine_name != app.engine.game_engine_name:
+        raise HTTPException(status_code=400, detail="Incompatible game engine")
+
+    if len(match.user_submissions) != app.engine.num_players:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected {app.engine.num_players} players,"
+            f"received only f{len(match.user_submissions)}",
+        )
+
     if match.num_players != len(match.user_submissions):
-        return {"errno": 400, "msg": "number of users should match submissions"}
+        raise HTTPException(
+            status_code=400, detail="Number of users should match number of submissions"
+        )
 
     # run the match (TODO: set match config)
-    currMatch = MatchRunner(match, {}, app.bucket)
+    currMatch = MatchRunner(match, {}, app.s3_resource)
     return currMatch.sendJob()
-    
 
 
 @app.post("/tournament/")
