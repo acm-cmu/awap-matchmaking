@@ -49,7 +49,7 @@ coverage.xml
 # Sphinx documentation
 docs/_build/
 
-# Local workspace items
+# Virtual environment
 venv/
 .env
 .ipynb_checkpoints/
