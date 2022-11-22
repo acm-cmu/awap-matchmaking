@@ -50,6 +50,6 @@ coverage.xml
 docs/_build/
 
 # Local workspace items
-venv
+venv/
 .env
 .ipynb_checkpoints/

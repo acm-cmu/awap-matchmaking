@@ -1,11 +1,15 @@
+import os
 from typing import Union
 
-from fastapi import FastAPI
-from pydantic import BaseModel
-from match_runner import MatchRunner
+from fastapi import FastAPI, HTTPException, Response, status
+from pydantic import BaseModel, BaseSettings
 import boto3
+from dotenv import load_dotenv
+from game_engine import GameEngine, setup_game_engine
 
-app = FastAPI()
+from match_runner import MatchRunner
+
+DATA_DIR = "data"
 
 
 class UserSubmission(BaseModel):
@@ -20,38 +24,48 @@ class Match(BaseModel):
     user_submissions: list[UserSubmission]
 
 
-class GameEngine(BaseModel):
-    game_engine_name: str
-    remote_location: str
-    remote_directory: str
-    num_players: int
-
-
 class Tournament(BaseModel):
     name: str
     user_submissions: list[UserSubmission]
     game_engine_name: str
 
 
+class App(FastAPI):
+    game_engine: GameEngine
+    dotenv_loaded: bool = False
+
+    s3 = None
+    bucket_bot = None
+    bucket_replays = None
+
+
+app = App()
+
+
+@app.on_event("startup")
+def load_env():
+    if not app.dotenv_loaded:
+        app.dotenv_loaded = True
+        load_dotenv()
+
+
 @app.on_event("startup")
 def init_game_engine():
-    # TODO: setup initial game engine?
-    pass
+    os.makedirs(DATA_DIR, exist_ok=True)
+
 
 @app.on_event("startup")
 def connect_to_s3():
-    # TODO: move these into a .env file :)
-    _client_key = ""
-    _client_secret = ""
-    _s3_bucket = "awap-test-bucket"
+    load_env()
+    _client_key = os.environ["AWS_CLIENT_KEY"]
+    _client_secret = os.environ["AWS_CLIENT_SECRET"]
 
-    s3 = boto3.resource(
+    app.s3 = boto3.resource(
         service_name="s3",
         region_name="us-east-1",
         aws_access_key_id=_client_key,
-        aws_secret_access_key=_client_secret
+        aws_secret_access_key=_client_secret,
     )
-    app.bucket = s3.Bucket(_s3_bucket)
 
 
 @app.get("/")
@@ -65,7 +79,18 @@ def set_game_engine(game_engine: GameEngine):
     This endpoint is used to set the game engine to be used for matches,
     and the number of players in the match. It replaces currently set game engine
     """
-    raise NotImplementedError
+    try:
+        setup_game_engine(game_engine, DATA_DIR)
+        app.game_engine = game_engine
+        return {"status": f"Game engine set to {game_engine.game_engine_name}"}
+    except ConnectionError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Could not download game engine: {str(exc)}"
+        ) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Could not save engine: {str(exc)}"
+        ) from exc
 
 
 @app.post("/match/")
@@ -98,7 +123,6 @@ def run_single_match(match: Match):
     # run the match (TODO: set match config)
     currMatch = MatchRunner(match, {}, app.bucket)
     return currMatch.sendJob()
-    
 
 
 @app.post("/tournament/")
