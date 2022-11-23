@@ -5,9 +5,9 @@ from fastapi import FastAPI, HTTPException, Response, status
 from pydantic import BaseModel, BaseSettings
 import boto3
 from dotenv import load_dotenv
-from game_engine import GameEngine, setup_game_engine
 
-from match_runner import Match, MatchRunner, UserSubmission
+from server.game_engine import GameEngine, setup_game_engine
+from server.match_runner import Match, MatchRunner, UserSubmission
 
 DATA_DIR = "data"
 
@@ -117,7 +117,6 @@ def run_single_match(match: Match):
             status_code=400, detail="Number of users should match number of submissions"
         )
 
-    # run the match (TODO: set match config)
     currMatch = MatchRunner(match, {}, app.s3_resource)
     return currMatch.sendJob()
 

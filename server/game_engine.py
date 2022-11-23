@@ -21,6 +21,7 @@ def setup_game_engine(game_engine: GameEngine, data_dir: str):
     """
     path = os.path.join(data_dir, ENGINE_NAME)
 
-    with open(path, "wb") as f:
-        r = requests.get(game_engine.download_url, allow_redirects=True)
-        f.write(r.content)
+    with open(path, "wb") as file:
+        response = requests.get(game_engine.download_url, allow_redirects=True)
+        response.raise_for_status()
+        file.write(response.content)
