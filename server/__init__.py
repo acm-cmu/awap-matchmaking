@@ -1,4 +1,4 @@
-import match_runner
-import game_engine
-import tournament_runner
-import storage_handler
+from . import match_runner
+from . import game_engine
+from . import tournament_runner
+from . import storage_handler

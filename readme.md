@@ -10,16 +10,19 @@ This project uses python3 and virtualenv to manage a separate python environment
 2. Ensure it is installed by
    `virtualenv --version`
 
-3. Activate vritualenv
+3. Create the virtual environment
+   `python3 -m venv matchmaking`
+
+4. Activate vritualenv
    `source matchmaking/bin/activate`
 
-4. Install requirements of this project
+5. Install requirements of this project
    `pip install -r requirements.txt`
 
-5. (Development) Install pre-commit message
+6. (Development) Install pre-commit message
    `pre-commit install`
 
-6. Configure the environment variables
+7. Configure the environment variables
    `cp .env.template .env`
 
    Edit `.env` in your favorite text editor. The following keys should be changed:
@@ -50,11 +53,12 @@ We are currently using docker to help containerize Tango (&redis). You will need
 
 1. Make sure to pull the Tango submodule
    `git pull --recurse-submodules`
+   `git submodule update --init --recursive`
 
-2. Initialize configuration files
+2. Initialize configuration files (if you already have a .env file, you can comment out that line from the Makefile)
    `make`
 
-3. Update the tango host address to your local volume. You can do this by going to the Tango folder, right clicking on volume and then `Copy Path` to `.env`
+3. Update the tango host address to your local volume. You can do this by going to the Tango folder, right clicking on volume and then `Copy Path` to `.env` (if this folder does not exist, then you may have to run the following docker commands in steps 5-7 once first)
    `DOCKER_TANGO_HOST_VOLUME_PATH=/home/ec2-user/autolab-docker/Tango/volumes`
 
 4. Create awap_image. This is the virtual container image, `awap_image`, that we spin up to run game matches.
