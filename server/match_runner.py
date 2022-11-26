@@ -9,6 +9,8 @@ import boto3
 import random
 import os
 import requests.exceptions as reqexc
+from typing import Any
+
 
 COURSE_LAB = "awap"
 MAKEFILE = "bots/autograde-Makefile"
@@ -24,6 +26,12 @@ class Match(BaseModel):
     game_engine_name: str
     num_players: int
     user_submissions: list[UserSubmission]
+
+
+class MatchCallback(BaseModel):
+    team_name_1: str
+    team_name_2: str
+    game_replay: list[Any]
 
 
 class MatchRunner:

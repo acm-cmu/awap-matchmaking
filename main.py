@@ -7,7 +7,8 @@ import boto3
 from dotenv import load_dotenv
 
 from server.game_engine import GameEngine, setup_game_engine
-from server.match_runner import Match, MatchRunner, UserSubmission
+from server.match_runner import Match, MatchRunner, UserSubmission, MatchCallback
+from server.storage_handler import StorageHandler
 
 DATA_DIR = "data"
 
@@ -83,6 +84,10 @@ def set_game_engine(new_engine: GameEngine):
 def run_single_match(match: Match):
     """
     Run a single match with the given number of players and user submissions.
+
+    Used to run single scrimmage matches requested between teams. These matches are unranked
+    and do not adjust elo.
+
     The number of players should match the number of user submissions, and match
     the number of players set in the game engine.
     Check game engine name matches the game engine set in the game engine endpoint.
@@ -119,6 +124,33 @@ def run_single_match(match: Match):
 
     currMatch = MatchRunner(match, {}, app.s3_resource)
     return currMatch.sendJob()
+
+
+@app.post("/single_match_callback/")
+def run_single_match_callback(match_replay_obj: MatchCallback):
+    """
+    Callback URL called by Tango when single unranked scrimmage match has finished running.
+
+    Parses the resulting JSON object and places the returned replay file into S3 bucket.
+
+    Since match is unranked, no need to parse output / adjust rankings
+    """
+    # TODO: figure out what format Tango returns the game info in; for now assume json with team names and replay info
+    storageHandler = StorageHandler(app.s3_resource)
+    storageHandler.upload_replay(match_replay_obj)
+
+
+@app.post("/scrimmage")
+def run_scrimmage(tournament: Tournament):
+    """
+    Run a set of scrimmages with the given user submissions and game engine.
+
+    Sets up scrimmage matches between the teams specified in the given request. The endpoint
+    should automatically determine 4-5 bots of similar elo for each bot and run these scrimmage matches.
+    Elo should be adjusted according to match results.
+
+    """
+    raise NotImplementedError
 
 
 @app.post("/tournament/")
