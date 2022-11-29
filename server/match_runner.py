@@ -11,6 +11,8 @@ import os
 import requests.exceptions as reqexc
 from typing import Any
 
+from server.game_engine import ENGINE_NAME
+
 
 COURSE_LAB = "awap"
 MAKEFILE = "bots/autograde-Makefile"
@@ -72,6 +74,7 @@ class MatchRunner:
                     headers=header,
                 )
                 response.raise_for_status()
+                print(response.json())
         except reqexc.HTTPError as exc:
             raise HTTPException(
                 status_code=500, detail="Could not connect to Tango"
@@ -96,10 +99,14 @@ class MatchRunner:
                 match_id = datetime.now().isoformat()
 
                 makefilename = self.uploadFile(MAKEFILE)
-                files = [{"localFile": makefilename, "destFile": makefilename}]
+                enginename = self.uploadFile("bots/run-match.py")
+                files = [
+                    {"localFile": makefilename, "destFile": "Makefile"},
+                    {"localFile": enginename, "destFile": enginename},
+                ]
 
                 for i, submission in enumerate(self.match.user_submissions):
-                    local_path = os.path.join(tempdir, f"team{i}.py")
+                    local_path = os.path.join(tempdir, f"team{i+1}.py")
                     self.s3.download_file(
                         submission.s3_bucket_name, submission.s3_object_name, local_path
                     )
@@ -112,13 +119,18 @@ class MatchRunner:
                     "image": "awap_image",
                     "jobName": match_id,
                     "output_file": "output.json",
+                    "timeout": 10,
                     "files": files,
+                    "callback_url": "http://172.26.71.250:8000/single_match_callback/",
                 }
+
+                print(requestObj)
 
                 response = requests.post(
                     f"{self.hostname}:{self.tango_port}/addJob/{self.key}/{COURSE_LAB}/",
                     data=json.dumps(requestObj),
                 )
+                print(response.json())
                 response.raise_for_status()
 
         except reqexc.HTTPError as exc:

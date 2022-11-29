@@ -1,7 +1,7 @@
 import os
 from typing import Optional, Union
 
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Response, status, File
 from pydantic import BaseModel, BaseSettings
 import boto3
 from dotenv import load_dotenv
@@ -127,7 +127,7 @@ def run_single_match(match: Match):
 
 
 @app.post("/single_match_callback/")
-def run_single_match_callback(match_replay_obj: MatchCallback):
+def run_single_match_callback(file: bytes = File()):
     """
     Callback URL called by Tango when single unranked scrimmage match has finished running.
 
@@ -135,9 +135,12 @@ def run_single_match_callback(match_replay_obj: MatchCallback):
 
     Since match is unranked, no need to parse output / adjust rankings
     """
+    print("test")
+    print("file_size:", len(file))
+    print(file)
     # TODO: figure out what format Tango returns the game info in; for now assume json with team names and replay info
-    storageHandler = StorageHandler(app.s3_resource)
-    storageHandler.upload_replay(match_replay_obj)
+    # storageHandler = StorageHandler(app.s3_resource)
+    # storageHandler.upload_replay(match_replay_obj)
 
 
 @app.post("/scrimmage")
