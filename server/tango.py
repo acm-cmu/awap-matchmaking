@@ -72,6 +72,8 @@ class TangoInterface:
                 "timeout": 30,
             }
 
+            print(request_obj)
+
             response = requests.post(
                 f"{self.tango_host}/addJob/{self.key}/{self.COURSELAB}/",
                 data=json.dumps(request_obj),

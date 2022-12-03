@@ -80,12 +80,15 @@ class MatchRunner:
                 )
                 self.files_param.append(self.uploadFile(local_path))
 
-        callback_url = f"{self.fastapi_host}/single_match_callback/{self.match_id}"
+        callback_url = (
+            f"http://{self.fastapi_host}/single_match_callback/{self.match_id}"
+        )
         output_file = f"output-{self.match_id}.json"
         print(output_file)
+        print(callback_url)
 
         return self.tango.add_job(
-            self.match_id,
+            str(self.match_id),
             self.files_param,
             output_file,
             callback_url,

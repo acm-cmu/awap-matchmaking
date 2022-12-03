@@ -1,4 +1,6 @@
+import json
 import os
+from socket import socket
 from time import time_ns
 from typing import Optional, Union, overload
 
@@ -44,6 +46,10 @@ class API(FastAPI):
         self.tango.open_courselab()
         self.makefile = self.tango.upload_file(
             self.environ.get("MAKEFILE"), "autograde-Makefile", "Makefile"
+        )
+
+        self.fastapi_host = (
+            f"{self.environ.get('FASTAPI_HOSTNAME')}:{self.environ.get('FASTAPI_PORT')}"
         )
 
 
@@ -147,7 +153,7 @@ def run_single_match(match: Match):
         dict(
             makefile=app.makefile,
             engine=app.engine_filename,
-            fastapi_host=f"{app.environ['FASTAPI_HOSTNAME']}:{app.environ['FASTAPI_PORT']}",
+            fastapi_host=app.fastapi_host,
         ),
         app.tango,
         app.s3_resource,
@@ -164,10 +170,10 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
 
     Since match is unranked, no need to parse output / adjust rankings
     """
-    print("test")
-    print(match_id)
+    print("match_id: ", match_id)
     print("file_size:", len(file))
-    print(file)
+    result = file.decode("utf-8").split("\n")
+    print(result)
     # TODO: figure out what format Tango returns the game info in; for now assume json with team names and replay info
     # storageHandler = StorageHandler(app.s3_resource)
     # storageHandler.upload_replay(match_replay_obj)
