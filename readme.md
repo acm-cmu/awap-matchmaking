@@ -13,7 +13,7 @@ This project uses python3 and virtualenv to manage a separate python environment
 3. Create the virtual environment
    `python3 -m venv matchmaking`
 
-4. Activate vritualenv
+4. Activate virtualenv
    `source matchmaking/bin/activate`
 
 5. Install requirements of this project
@@ -33,19 +33,29 @@ This project uses python3 and virtualenv to manage a separate python environment
 
    The other settings may be edited as necessary.
 
+8. Enable permissions to run the FastAPI script.
+
+   `chmod +x ./run-fastapi.sh`
+
 To deactivate the virtualenv, just use `deactivate`.
 
 ## Running the matchmaking server
 
 This project uses [FastAPI](https://fastapi.tiangolo.com/).
 
-After following the above steps, to run the server, run the following command in the root directory
+After following the above steps, to run the server:
 
-`uvicorn main:app --reload --reload-exclude "data/**"`
+1. Determine your IP address by running the `ip address` command.
 
-It should now run on `http://localhost:8000`
+2. Run the following command with the appropriate arguments:
 
-You will able to also see an interactive documentation at `http://localhost:8000/docs`
+`./run-fastapi.sh IP_ADDRESS [PORT]`
+
+where `PORT` should be a port number (if omitted, it will default to `8000`).
+
+It should now run on `http://0.0.0.0:8000`.
+
+You will able to also see an interactive documentation at `http://0.0.0.0:8000/docs`
 
 ## Running the Tango containerized server
 
