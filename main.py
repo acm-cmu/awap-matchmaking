@@ -1,5 +1,6 @@
 import os
-from typing import Optional, Union
+from time import time_ns
+from typing import Optional, Union, overload
 
 from fastapi import FastAPI, HTTPException, Response, status, File
 from pydantic import BaseModel, BaseSettings
@@ -9,8 +10,7 @@ from dotenv import load_dotenv
 from server.game_engine import GameEngine, setup_game_engine
 from server.match_runner import Match, MatchRunner, UserSubmission, MatchCallback
 from server.storage_handler import StorageHandler
-
-DATA_DIR = "data"
+from server.tango import TangoInterface
 
 
 class Tournament(BaseModel):
@@ -20,31 +20,46 @@ class Tournament(BaseModel):
 
 
 class API(FastAPI):
-    engine: Optional[GameEngine] = None
-    dotenv_loaded: bool = False
-    s3_resource = None
+    engine: Optional[GameEngine]
+    engine_filename: Optional[dict[str, str]]
+    makefile: dict[str, str]
+
+    temp_file_dir: str
+    environ: os._Environ[str]
+    tango: TangoInterface
+
+    def __init__(self):
+        super().__init__()
+        self.engine = None
+        self.s3_resource = None
+        self.engine_filename = None
+        load_dotenv()
+        self.environ = os.environ
+        self.tango = TangoInterface(
+            self.environ.get("RESTFUL_KEY"),
+            self.environ.get("TANGO_HOSTNAME", "http://localhost"),
+            self.environ.get("RESTFUL_PORT", "3000"),
+        )
+
+        self.tango.open_courselab()
+        self.makefile = self.tango.upload_file(
+            self.environ.get("MAKEFILE"), "autograde-Makefile", "Makefile"
+        )
 
 
 app = API()
 
 
 @app.on_event("startup")
-def load_env():
-    if not app.dotenv_loaded:
-        app.dotenv_loaded = True
-        load_dotenv()
-
-
-@app.on_event("startup")
 def init_game_engine():
-    os.makedirs(DATA_DIR, exist_ok=True)
+    app.temp_file_dir = app.environ.get("TEMPFILE_DIR", "data")
+    os.makedirs(app.temp_file_dir, exist_ok=True)
 
 
 @app.on_event("startup")
 def connect_to_s3():
-    load_env()
-    _client_key = os.environ["AWS_CLIENT_KEY"]
-    _client_secret = os.environ["AWS_CLIENT_SECRET"]
+    _client_key = app.environ.get("AWS_CLIENT_KEY")
+    _client_secret = app.environ.get("AWS_CLIENT_SECRET")
 
     app.s3_resource = boto3.client(
         service_name="s3",
@@ -66,8 +81,7 @@ def set_game_engine(new_engine: GameEngine):
     and the number of players in the match. It replaces currently set game engine
     """
     try:
-        setup_game_engine(new_engine, DATA_DIR)
-        app.engine = new_engine
+        local_path = setup_game_engine(new_engine, app.temp_file_dir)
     except ConnectionError as exc:
         raise HTTPException(
             status_code=400, detail=f"Could not download game engine: {str(exc)}"
@@ -76,6 +90,12 @@ def set_game_engine(new_engine: GameEngine):
         raise HTTPException(
             status_code=500, detail=f"Could not save engine: {str(exc)}"
         ) from exc
+
+    app.engine = new_engine
+    tango_engine_name = f"{time_ns()}-{new_engine.engine_filename}"
+    app.engine_filename = app.tango.upload_file(
+        local_path, tango_engine_name, new_engine.engine_filename
+    )
 
     return {"status": f"Game engine set to {app.engine.game_engine_name}"}
 
@@ -122,12 +142,21 @@ def run_single_match(match: Match):
             status_code=400, detail="Number of users should match number of submissions"
         )
 
-    currMatch = MatchRunner(match, {}, app.s3_resource)
+    currMatch = MatchRunner(
+        match,
+        dict(
+            makefile=app.makefile,
+            engine=app.engine_filename,
+            fastapi_host=f"{app.environ['FASTAPI_HOSTNAME']}:{app.environ['FASTAPI_PORT']}",
+        ),
+        app.tango,
+        app.s3_resource,
+    )
     return currMatch.sendJob()
 
 
-@app.post("/single_match_callback/")
-def run_single_match_callback(file: bytes = File()):
+@app.post("/single_match_callback/{match_id}")
+def run_single_match_callback(match_id: int, file: bytes = File()):
     """
     Callback URL called by Tango when single unranked scrimmage match has finished running.
 
@@ -136,6 +165,7 @@ def run_single_match_callback(file: bytes = File()):
     Since match is unranked, no need to parse output / adjust rankings
     """
     print("test")
+    print(match_id)
     print("file_size:", len(file))
     print(file)
     # TODO: figure out what format Tango returns the game info in; for now assume json with team names and replay info
