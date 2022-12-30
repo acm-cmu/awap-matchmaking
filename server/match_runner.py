@@ -27,12 +27,6 @@ class Match(BaseModel):
     user_submissions: list[UserSubmission]
 
 
-class MatchCallback(BaseModel):
-    team_name_1: str
-    team_name_2: str
-    game_replay: list[Any]
-
-
 class MatchRunner:
     match: Match
     tango: TangoInterface

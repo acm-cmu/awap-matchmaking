@@ -28,8 +28,24 @@ This project uses python3 and virtualenv to manage a separate python environment
    Edit `.env` in your favorite text editor. The following keys should be changed:
 
    - `RESTFUL_KEY`
+
+      This is key used for Tango. It can arbitrarily be set to "test" during testing, but will need to be changed for production.
+
+   - `TANGO_HOSTNAME`
+
+      This is your computer's ip address (see below). For local testing, it should take the form "http://[your ip address]"
+
    - `AWS_CLIENT_KEY`
-   - `AWS_CLIENT_SERVER`
+
+      This is the AWS access key ID. You can find this in the permissions file on Google Drive.
+
+   - `AWS_CLIENT_SECRET`
+
+      This is the secret AWS access key. This can also be found in the permissions file on Google Drive.
+
+   - `AWS_REPLAY_BUCKET_NAME`
+
+      This is the folder on s3 that replays are uploaded into.
 
    The other settings may be edited as necessary.
 
@@ -45,7 +61,7 @@ This project uses [FastAPI](https://fastapi.tiangolo.com/).
 
 After following the above steps, to run the server:
 
-1. Determine your IP address by running the `ip address` command.
+1. Determine your IP address by running the `ip address` (or `ipconfig getifaddr en0` on Mac) command. Set this as the `TANGO_HOSTNAME` in the .env file.
 
 2. Run the following command with the appropriate arguments:
 
@@ -80,3 +96,54 @@ We are currently using docker to help containerize Tango (&redis). You will need
 6. Check if the services are running sucessfully by visiting `localhost:3000`
 
 7. In the future, you only need to do step 5 to get the services up. You can also run the services from the images section of your Docker Dashboard.
+
+# Usage
+Run the matchmaking server using the two commands in two different terminals, as mentioned above:
+
+`docker compose up`
+
+`./run-fastapi.sh IP_ADDRESS [PORT]`
+
+The first step is to set the game engine. Upload the game engine file to S3. Select the file, click on "actions", then "share with presigned URL", and specify some time. Do the same thing with the game engine makefile. Then, hit the following endpoint to set the game engine:
+
+```
+POST: http://localhost:8000/game_engine
+body:
+{
+    "game_engine_name": [name for game engine (arbitrarily set)],
+    "engine_filename": [filename to be downloaded from s3],
+    "engine_download_url": [presigned URL from above],
+    "makefile_filename": [filename for makefile on s3],
+    "makefile_download_url: [presigned URL from above],
+    "num_players": [number of players for each game]
+}
+```
+
+The makefile should contain the commands used to run the game. It is executed every time a match is run (so it should include commands such as `python3 run_game_file.py`, for example). An example game `simple.py` and `autograde-Makefile` are on S3 (maybe).
+
+If there are multiple files in the game engine, then maybe you should tar the game engine file and include an untarring command in the makefile.  ?
+
+Now, you can run a single scrimmage match between two teams using the following endpoint:
+
+```
+POST: http://localhost:8000/match
+body:
+{
+    "game_engine_name": [name specified in previous step],
+    "num_players": 2,
+    "user_submissions": [
+         {
+            "username": [first team name],
+            "s3_bucket_name": [S3 bucket bot is located in],
+            "s3_object_name": [bot filename in S3 bucket]
+         },
+         {
+            "username": [second team name],
+            "s3_bucket_name": [S3 bucket bot is located in],
+            "s3_object_name": [bot filename in S3 bucket]
+        },
+    ]
+}
+```
+
+This will upload the bots to Tango and run the commands in the makefile. The autograder output gets uploaded to S3 in the replays bucket specified by `AWS_REPLAY_BUCKET_NAME` in the .env file.

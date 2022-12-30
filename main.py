@@ -10,7 +10,7 @@ import boto3
 from dotenv import load_dotenv
 
 from server.game_engine import GameEngine, setup_game_engine
-from server.match_runner import Match, MatchRunner, UserSubmission, MatchCallback
+from server.match_runner import Match, MatchRunner, UserSubmission
 from server.storage_handler import StorageHandler
 from server.tango import TangoInterface
 
@@ -44,10 +44,6 @@ class API(FastAPI):
         )
 
         self.tango.open_courselab()
-        self.makefile = self.tango.upload_file(
-            self.environ.get("MAKEFILE"), "autograde-Makefile", "Makefile"
-        )
-
         self.fastapi_host = (
             f"{self.environ.get('FASTAPI_HOSTNAME')}:{self.environ.get('FASTAPI_PORT')}"
         )
@@ -84,10 +80,12 @@ def read_root():
 def set_game_engine(new_engine: GameEngine):
     """
     This endpoint is used to set the game engine to be used for matches,
-    and the number of players in the match. It replaces currently set game engine
+    and the number of players in the match. It replaces currently set game engine.
     """
     try:
-        local_path = setup_game_engine(new_engine, app.temp_file_dir)
+        local_engine_path, local_makefile_path = setup_game_engine(
+            new_engine, app.temp_file_dir
+        )
     except ConnectionError as exc:
         raise HTTPException(
             status_code=400, detail=f"Could not download game engine: {str(exc)}"
@@ -98,9 +96,13 @@ def set_game_engine(new_engine: GameEngine):
         ) from exc
 
     app.engine = new_engine
-    tango_engine_name = f"{time_ns()}-{new_engine.engine_filename}"
+    tango_engine_name = f"{new_engine.engine_filename}"
     app.engine_filename = app.tango.upload_file(
-        local_path, tango_engine_name, new_engine.engine_filename
+        local_engine_path, tango_engine_name, new_engine.engine_filename
+    )
+
+    app.makefile = app.tango.upload_file(
+        local_makefile_path, "autograde-Makefile", "Makefile"
     )
 
     return {"status": f"Game engine set to {app.engine.game_engine_name}"}
@@ -174,9 +176,9 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
     print("file_size:", len(file))
     result = file.decode("utf-8").split("\n")
     print(result)
-    # TODO: figure out what format Tango returns the game info in; for now assume json with team names and replay info
-    # storageHandler = StorageHandler(app.s3_resource)
-    # storageHandler.upload_replay(match_replay_obj)
+
+    storageHandler = StorageHandler(app.s3_resource)
+    storageHandler.upload_replay(match_id, file)
 
 
 @app.post("/scrimmage")

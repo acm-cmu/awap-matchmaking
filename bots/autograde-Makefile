@@ -1,2 +1,2 @@
 autograde:
-	python3 run-match.py
+	python3 simple.py
