@@ -13,6 +13,7 @@ from server.game_engine import GameEngine, setup_game_engine
 from server.match_runner import Match, MatchRunner, UserSubmission
 from server.storage_handler import StorageHandler
 from server.tango import TangoInterface
+from server.ranked_game_runner import RankedGameRunner, RankedScrimmages
 
 
 class Tournament(BaseModel):
@@ -34,6 +35,7 @@ class API(FastAPI):
         super().__init__()
         self.engine = None
         self.s3_resource = None
+        self.dynamodb_resource = None
         self.engine_filename = None
         load_dotenv()
         self.environ = os.environ
@@ -65,6 +67,19 @@ def connect_to_s3():
 
     app.s3_resource = boto3.client(
         service_name="s3",
+        region_name="us-east-1",
+        aws_access_key_id=_client_key,
+        aws_secret_access_key=_client_secret,
+    )
+
+
+@app.on_event("startup")
+def connect_to_dynamodb():
+    _client_key = app.environ.get("AWS_CLIENT_KEY")
+    _client_secret = app.environ.get("AWS_CLIENT_SECRET")
+
+    app.dynamodb_resource = boto3.resource(
+        service_name="dynamodb",
         region_name="us-east-1",
         aws_access_key_id=_client_key,
         aws_secret_access_key=_client_secret,
@@ -174,24 +189,28 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
     """
     print("match_id: ", match_id)
     print("file_size:", len(file))
-    result = file.decode("utf-8").split("\n")
-    print(result)
-
     storageHandler = StorageHandler(app.s3_resource)
     storageHandler.upload_replay(match_id, file)
 
 
 @app.post("/scrimmage")
-def run_scrimmage(tournament: Tournament):
+def run_scrimmage(ranked_scrimmages: RankedScrimmages):
     """
-    Run a set of scrimmages with the given user submissions and game engine.
+    Run a set of ranked scrimmages with the given user submissions and game engine.
 
     Sets up scrimmage matches between the teams specified in the given request. The endpoint
     should automatically determine 4-5 bots of similar elo for each bot and run these scrimmage matches.
     Elo should be adjusted according to match results.
 
     """
-    raise NotImplementedError
+    if app.engine is None:
+        raise HTTPException(status_code=400, detail="Game engine not set yet")
+
+    if ranked_scrimmages.game_engine_name != app.engine.game_engine_name:
+        raise HTTPException(status_code=400, detail="Incompatible game engine")
+
+    rankedGameRunner = RankedGameRunner(app.dynamodb_resource)
+    rankedGameRunner.run_round_robin(ranked_scrimmages)
 
 
 @app.post("/tournament/")

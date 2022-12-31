@@ -47,6 +47,10 @@ This project uses python3 and virtualenv to manage a separate python environment
 
       This is the folder on s3 that replays are uploaded into.
 
+   - `AWS_PLAYER_TABLE_NAME`
+
+      This is the table on dynamoDB on AWS that stores player info (team name, rating, ...)
+
    The other settings may be edited as necessary.
 
 8. Enable permissions to run the FastAPI script.
