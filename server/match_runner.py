@@ -27,11 +27,22 @@ class Match(BaseModel):
     user_submissions: list[UserSubmission]
 
 
+class MatchPlayer:
+    user_info: UserSubmission
+    rating: int
+
+    def __init__(self, user_info: UserSubmission, rating: int):
+        self.user_info = user_info
+        self.rating = rating
+
+
 class MatchRunner:
     match: Match
     tango: TangoInterface
 
     files_param: list
+
+    callback_endpoint: str
 
     def __init__(
         self,
@@ -39,6 +50,7 @@ class MatchRunner:
         match_runner_config: dict,
         tango: TangoInterface,
         s3_resource,
+        callback_endpoint,
     ):
         self.match = match
         self.s3 = s3_resource
@@ -51,6 +63,7 @@ class MatchRunner:
 
         self.tango = tango
         self.fastapi_host = match_runner_config["fastapi_host"]
+        self.callback_endpoint = callback_endpoint
 
     def uploadFile(self, pathname: str) -> dict[str, str]:
         filename = pathname.split("/")[-1]
@@ -75,11 +88,9 @@ class MatchRunner:
                 self.files_param.append(self.uploadFile(local_path))
 
         callback_url = (
-            f"http://{self.fastapi_host}/single_match_callback/{self.match_id}"
+            f"http://{self.fastapi_host}/{self.callback_endpoint}/{self.match_id}"
         )
         output_file = f"output-{self.match_id}.json"
-        print(output_file)
-        print(callback_url)
 
         return self.tango.add_job(
             str(self.match_id),
@@ -87,3 +98,22 @@ class MatchRunner:
             output_file,
             callback_url,
         )
+
+    @staticmethod
+    def get_match_players_info(dynamodb_table, players: list[UserSubmission]):
+        match_player_info = []
+        for user in players:
+            try:
+                currPlayer = MatchPlayer(
+                    user,
+                    dynamodb_table.get_item(Key={"TEAM_NAME": user.username})["Item"][
+                        "RATING"
+                    ],
+                )
+                match_player_info.append(currPlayer)
+            except:
+                # the specified user is not in the database
+                print("not found")
+                pass
+        match_player_info = sorted(match_player_info, key=lambda x: x.rating)
+        return match_player_info

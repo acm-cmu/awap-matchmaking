@@ -14,12 +14,7 @@ from server.match_runner import Match, MatchRunner, UserSubmission
 from server.storage_handler import StorageHandler
 from server.tango import TangoInterface
 from server.ranked_game_runner import RankedGameRunner, RankedScrimmages
-
-
-class Tournament(BaseModel):
-    name: str
-    user_submissions: list[UserSubmission]
-    game_engine_name: str
+from server.tournament_runner import TournamentRunner, Tournament
 
 
 class API(FastAPI):
@@ -30,6 +25,8 @@ class API(FastAPI):
     temp_file_dir: str
     environ: os._Environ[str]
     tango: TangoInterface
+
+    ongoing_tournaments: dict[int, dict[int, str]]
 
     def __init__(self):
         super().__init__()
@@ -49,6 +46,8 @@ class API(FastAPI):
         self.fastapi_host = (
             f"{self.environ.get('FASTAPI_HOSTNAME')}:{self.environ.get('FASTAPI_PORT')}"
         )
+
+        self.ongoing_tournaments = {}
 
 
 app = API()
@@ -174,6 +173,7 @@ def run_single_match(match: Match):
         ),
         app.tango,
         app.s3_resource,
+        "single_match_callback",
     )
     return currMatch.sendJob()
 
@@ -190,7 +190,7 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
     print("match_id: ", match_id)
     print("file_size:", len(file))
     storageHandler = StorageHandler(app.s3_resource)
-    storageHandler.upload_replay(match_id, file)
+    storageHandler.upload_replay(match_id, file, "scrimmage")
 
 
 @app.post("/scrimmage")
@@ -234,4 +234,41 @@ def run_tournament(tournament: Tournament):
 
     Returns if the tournament is added to tournament queue, the tournament id.
     """
-    raise NotImplementedError
+    if app.engine is None:
+        raise HTTPException(status_code=400, detail="Game engine not set yet")
+
+    if tournament.game_engine_name != app.engine.game_engine_name:
+        raise HTTPException(status_code=400, detail="Incompatible game engine")
+
+    tournament_id = time_ns()
+    rankedGameRunner = TournamentRunner(
+        app.dynamodb_resource,
+        tournament_id,
+        app.ongoing_tournaments,
+        dict(
+            makefile=app.makefile,
+            engine=app.engine_filename,
+            fastapi_host=app.fastapi_host,
+        ),
+        app.tango,
+        app.s3_resource,
+    )
+    rankedGameRunner.run_tournament(tournament)
+    return tournament_id
+
+
+@app.post("/tournament_callback/{tournament_id}/{match_id}")
+def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = File()):
+    """
+    Callback URL called by Tango when tournament match has finished running.
+
+    Parses the resulting JSON object and places the returned replay file into S3 bucket.
+
+    Parse the results and put the winner into the "ongoing_tournaments" dict
+    """
+    print("received callback for match_id: ", match_id)
+    storageHandler = StorageHandler(app.s3_resource)
+    storageHandler.upload_replay(match_id, file, "tournament")
+    app.ongoing_tournaments[tournament_id][
+        match_id
+    ] = storageHandler.get_winner_from_replay(file)

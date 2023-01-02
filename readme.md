@@ -151,3 +151,42 @@ body:
 ```
 
 This will upload the bots to Tango and run the commands in the makefile. The autograder output gets uploaded to S3 in the replays bucket specified by `AWS_REPLAY_BUCKET_NAME` in the .env file.
+
+You can run a tournament using the following endpoint:
+```
+POST: http://localhost:8000/tournament
+body:
+{
+   "game_engine_name": "name specified in previous step",
+   "user_submissions": [
+        {
+            "username": "testteam1",
+            "s3_bucket_name": "awap23-bots",
+            "s3_object_name": "bot1.py"
+        },
+        {
+            "username": "testteam2",
+            "s3_bucket_name": "awap23-bots",
+            "s3_object_name": "bot2.py"
+        },
+        {
+            "username": "testteam3",
+            "s3_bucket_name": "awap23-bots",
+            "s3_object_name": "bot3.py"
+        }
+        ...
+    ]
+}
+```
+The endpoint will lookup the usernames on the database and seed the teams in a bracket according to their rating. It will place the replay files into the replay bucket with the filename `tournament-[match-id].json`. It will also upload a summary of the tournament bracket into the replay bucket with the filename `tournament_bracket-[tournament_id].json`. The tournament summary might take the following format for a bracket with 3 teams, for example:
+```
+[
+   [
+      {'player1': 'testteam1', 'player2': 'bye', 'winner': 'testteam1', 'replay_filename': ''},
+      {'player1': 'testteam2', 'player2': 'testteam3', 'winner': 'testteam2', 'replay_filename': 'tournament-1672697344770654000.json'}
+   ],
+   [
+      {'player1': 'testteam1', 'player2': 'testteam2', 'winner': 'testteam1', 'replay_filename': 'tournament-1672697348070820000.json'}
+   ]
+]
+```
