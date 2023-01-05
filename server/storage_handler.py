@@ -44,5 +44,19 @@ class StorageHandler:
         result = json.loads(replay_file.decode("utf-8").split("\n")[-2])
         return result["scores"]["Outcome"]
 
+    @staticmethod
+    def adjust_elo_table(dynamodb_table, new_elos: dict[str, int]):
+        for team_name, new_elo in new_elos.items():
+            try:
+                dynamodb_table.update_item(
+                    Key={"tid": team_name},
+                    UpdateExpression="set RATING=:r",
+                    ExpressionAttributeValues={":r": new_elo},
+                )
+            except Exception as e:
+                print("issue with updating rating")
+                print(e)
+                pass
+
     def upload_other_stuff():
         raise NotImplementedError

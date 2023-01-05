@@ -190,3 +190,31 @@ The endpoint will lookup the usernames on the database and seed the teams in a b
    ]
 ]
 ```
+
+Similarly, you can run a batch of ranked scrimmages using the following endpoint:
+```
+POST: http://localhost:8000/scrimmage
+body:
+{
+   "game_engine_name": "name specified in previous step",
+   "user_submissions": [
+        {
+            "username": "testteam1",
+            "s3_bucket_name": "awap23-bots",
+            "s3_object_name": "bot1.py"
+        },
+        {
+            "username": "testteam2",
+            "s3_bucket_name": "awap23-bots",
+            "s3_object_name": "bot2.py"
+        },
+        {
+            "username": "testteam3",
+            "s3_bucket_name": "awap23-bots",
+            "s3_object_name": "bot3.py"
+        }
+        ...
+    ]
+}
+```
+The endpoint will lookup the usernames and ratings on the database and run scrimmage matches between teams with similar ratings. It will place the replay files into the replay bucket with the filename `ranked_scrimmage-[match-id].json` and adjust the elo according to winners/losers from each match.

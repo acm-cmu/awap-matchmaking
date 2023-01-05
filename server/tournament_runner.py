@@ -16,7 +16,7 @@ class TournamentRunner:
         self,
         dynamodb_resource,
         tournament_id,
-        ongoing_tournaments,
+        ongoing_batch_match_runners,
         match_runner_config,
         tango,
         s3_resource,
@@ -26,8 +26,8 @@ class TournamentRunner:
 
         # global table mapping: tournament_id -> match_id -> winner
         # the match callback will update this map, and the tournament will wait until the matchid appears in the dict
-        self.ongoing_tournaments_table = ongoing_tournaments
-        self.ongoing_tournaments_table[tournament_id] = {}
+        self.ongoing_batch_match_runners_table = ongoing_batch_match_runners
+        self.ongoing_batch_match_runners_table[tournament_id] = {}
 
         # used for the matchrunner
         self.match_runner_config = match_runner_config
@@ -43,7 +43,7 @@ class TournamentRunner:
         # set up a thread that will run the tournament
         thread = Thread(
             target=self.tournament_worker_thread,
-            args=(tournament.game_engine_name, tournament_players),
+            args=(tournament, tournament_players),
         )
         thread.daemon = True
         thread.start()
@@ -53,7 +53,7 @@ class TournamentRunner:
         return (n != 0) and (n & (n - 1) == 0)
 
     def tournament_worker_thread(
-        self, game_engine_name, tournament_players: list[MatchPlayer]
+        self, tournament: Tournament, tournament_players: list[MatchPlayer]
     ):
         # pad the list of players with byes until power of 2
         while not self.is_pow_two(len(tournament_players)):
@@ -95,7 +95,7 @@ class TournamentRunner:
                     continue
 
                 match = Match(
-                    game_engine_name=game_engine_name,
+                    game_engine_name=tournament.game_engine_name,
                     num_players=2,  # TODO: tournament just assumes 1v1 for now
                     user_submissions=[
                         curr_tournament_layer[i].user_info,
@@ -115,14 +115,14 @@ class TournamentRunner:
                 # wait for the match to finish
                 while (
                     currMatch.match_id
-                    not in self.ongoing_tournaments_table[self.tournament_id]
+                    not in self.ongoing_batch_match_runners_table[self.tournament_id]
                 ):
                     pass
 
                 # add the winner to the next tournament layer
                 # TODO: assume winner is either 1 or 2 right now
                 winner_id = (
-                    self.ongoing_tournaments_table[self.tournament_id][
+                    self.ongoing_batch_match_runners_table[self.tournament_id][
                         currMatch.match_id
                     ]
                     - 1
@@ -150,3 +150,4 @@ class TournamentRunner:
         storageHandler.upload_tournament_bracket(
             self.tournament_id, complete_tournament_results
         )
+        self.ongoing_batch_match_runners_table.pop(self.tournament_id)

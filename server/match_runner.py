@@ -101,19 +101,24 @@ class MatchRunner:
 
     @staticmethod
     def get_match_players_info(dynamodb_table, players: list[UserSubmission]):
+        table_username_key = "tid"
+        table_rating_column_name = "RATING"
+
         match_player_info = []
         for user in players:
             try:
                 currPlayer = MatchPlayer(
                     user,
-                    dynamodb_table.get_item(Key={"TEAM_NAME": user.username})["Item"][
-                        "RATING"
-                    ],
+                    dynamodb_table.get_item(Key={table_username_key: user.username})[
+                        "Item"
+                    ][table_rating_column_name],
                 )
                 match_player_info.append(currPlayer)
             except:
                 # the specified user is not in the database
-                print("not found")
+                print(f"{user.username} rating info could not be found")
                 pass
-        match_player_info = sorted(match_player_info, key=lambda x: x.rating)
+        match_player_info = sorted(
+            match_player_info, key=lambda x: x.rating, reverse=True
+        )
         return match_player_info

@@ -26,7 +26,7 @@ class API(FastAPI):
     environ: os._Environ[str]
     tango: TangoInterface
 
-    ongoing_tournaments: dict[int, dict[int, str]]
+    ongoing_batch_match_runners_table: dict[int, dict[int, str]]
 
     def __init__(self):
         super().__init__()
@@ -47,7 +47,7 @@ class API(FastAPI):
             f"{self.environ.get('FASTAPI_HOSTNAME')}:{self.environ.get('FASTAPI_PORT')}"
         )
 
-        self.ongoing_tournaments = {}
+        self.ongoing_batch_match_runners_table = {}
 
 
 app = API()
@@ -190,7 +190,7 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
     print("match_id: ", match_id)
     print("file_size:", len(file))
     storageHandler = StorageHandler(app.s3_resource)
-    storageHandler.upload_replay(match_id, file, "scrimmage")
+    storageHandler.upload_replay(match_id, file, "unranked")
 
 
 @app.post("/scrimmage")
@@ -209,8 +209,38 @@ def run_scrimmage(ranked_scrimmages: RankedScrimmages):
     if ranked_scrimmages.game_engine_name != app.engine.game_engine_name:
         raise HTTPException(status_code=400, detail="Incompatible game engine")
 
-    rankedGameRunner = RankedGameRunner(app.dynamodb_resource)
-    rankedGameRunner.run_round_robin(ranked_scrimmages)
+    scrimmage_id = time_ns()
+    rankedGameRunner = RankedGameRunner(
+        app.dynamodb_resource,
+        scrimmage_id,
+        app.ongoing_batch_match_runners_table,
+        dict(
+            makefile=app.makefile,
+            engine=app.engine_filename,
+            fastapi_host=app.fastapi_host,
+        ),
+        app.tango,
+        app.s3_resource,
+    )
+    rankedGameRunner.run_ranked_scrimmage(ranked_scrimmages)
+    return scrimmage_id
+
+
+@app.post("/scrimmage_callback/{scrimmage_id}/{match_id}")
+def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File()):
+    """
+    Callback URL called by Tango when tournament match has finished running.
+
+    Parses the resulting JSON object and places the returned replay file into S3 bucket.
+
+    Parse the results and put the winner into the "ongoing_tournaments" dict
+    """
+    print("received scrimmage callback for match_id: ", match_id)
+    storageHandler = StorageHandler(app.s3_resource)
+    storageHandler.upload_replay(match_id, file, "ranked_scrimmage")
+    app.ongoing_batch_match_runners_table[scrimmage_id][
+        match_id
+    ] = storageHandler.get_winner_from_replay(file)
 
 
 @app.post("/tournament/")
@@ -244,7 +274,7 @@ def run_tournament(tournament: Tournament):
     rankedGameRunner = TournamentRunner(
         app.dynamodb_resource,
         tournament_id,
-        app.ongoing_tournaments,
+        app.ongoing_batch_match_runners_table,
         dict(
             makefile=app.makefile,
             engine=app.engine_filename,
@@ -266,9 +296,9 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
 
     Parse the results and put the winner into the "ongoing_tournaments" dict
     """
-    print("received callback for match_id: ", match_id)
+    print("received tournament callback for match_id: ", match_id)
     storageHandler = StorageHandler(app.s3_resource)
     storageHandler.upload_replay(match_id, file, "tournament")
-    app.ongoing_tournaments[tournament_id][
+    app.ongoing_batch_match_runners_table[tournament_id][
         match_id
     ] = storageHandler.get_winner_from_replay(file)
