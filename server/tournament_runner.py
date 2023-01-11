@@ -9,6 +9,7 @@ from server.storage_handler import StorageHandler
 class Tournament(BaseModel):
     user_submissions: list[UserSubmission]
     game_engine_name: str
+    num_tournament_spots: int
 
 
 class TournamentRunner:
@@ -55,6 +56,8 @@ class TournamentRunner:
     def tournament_worker_thread(
         self, tournament: Tournament, tournament_players: list[MatchPlayer]
     ):
+        tournament_players = tournament_players[: tournament.num_tournament_spots]
+
         # pad the list of players with byes until power of 2
         while not self.is_pow_two(len(tournament_players)):
             tournament_players.append(None)

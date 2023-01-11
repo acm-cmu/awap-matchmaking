@@ -18,9 +18,6 @@ class Elo:
     def calc_expected_score(first_elo: int, second_elo: int):
         return 1 / (1 + pow(10, (second_elo - first_elo) / 400))
 
-    def adjusted_elo(elo: int, score: int, expected_score: int):
-        return int(elo + Elo.k * (score - expected_score))
-
     # returns tuple representing (change to first team's elo, change to second team's elo)
     def calc_elo_change(first_elo: int, second_elo: int, first_team_won: bool):
         score = 1 if first_team_won else 0

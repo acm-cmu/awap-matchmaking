@@ -197,6 +197,7 @@ POST: http://localhost:8000/scrimmage
 body:
 {
    "game_engine_name": "name specified in previous step",
+   "num_tournament_spots": 8,
    "user_submissions": [
         {
             "username": "testteam1",
