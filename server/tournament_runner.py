@@ -23,7 +23,6 @@ class TournamentRunner:
         s3_resource,
     ):
         self.tournament_id = tournament_id
-        self.player_table = dynamodb_resource.Table(os.environ["AWS_PLAYER_TABLE_NAME"])
 
         # global table mapping: tournament_id -> match_id -> winner
         # the match callback will update this map, and the tournament will wait until the matchid appears in the dict
@@ -34,11 +33,15 @@ class TournamentRunner:
         self.match_runner_config = match_runner_config
         self.tango = tango
         self.s3_resource = s3_resource
+        self.dynamodb_resource = (
+            dynamodb_resource  # also needed for player table / looking up elos
+        )
 
     def run_tournament(self, tournament: Tournament):
         # get the ratings of the users specified in the list
         tournament_players = MatchRunner.get_match_players_info(
-            self.player_table, tournament.user_submissions
+            self.dynamodb_resource.Table(os.environ["AWS_PLAYER_TABLE_NAME"]),
+            tournament.user_submissions,
         )
 
         # set up a thread that will run the tournament
@@ -111,7 +114,9 @@ class TournamentRunner:
                     self.match_runner_config,
                     self.tango,
                     self.s3_resource,
+                    self.dynamodb_resource,
                     f"tournament_callback/{self.tournament_id}",
+                    "tournament",
                 )
                 currMatch.sendJob()
 
@@ -149,7 +154,7 @@ class TournamentRunner:
         # tournament has been completed; upload final tournament bracket onto s3
         print("completed tournament with following bracket: ")
         print(complete_tournament_results)
-        storageHandler = StorageHandler(self.s3_resource)
+        storageHandler = StorageHandler(s3_resource=self.s3_resource)
         storageHandler.upload_tournament_bracket(
             self.tournament_id, complete_tournament_results
         )

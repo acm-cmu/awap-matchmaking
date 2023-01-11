@@ -39,7 +39,6 @@ class RankedGameRunner:
         tango,
         s3_resource,
     ):
-        self.player_table = dynamodb_resource.Table(os.environ["AWS_PLAYER_TABLE_NAME"])
         self.scrimmage_id = scrimmage_id
 
         # global table mapping: scrimmage -> match_id -> winner
@@ -51,15 +50,20 @@ class RankedGameRunner:
         self.match_runner_config = match_runner_config
         self.tango = tango
         self.s3_resource = s3_resource
+        self.dynamodb_resource = (
+            dynamodb_resource  # also needed for player table / looking up elos
+        )
 
     def run_ranked_scrimmage(self, ranked_scrimmage: RankedScrimmages):
         if len(ranked_scrimmage.user_submissions) < RankedGameRunner.num_matches:
             # TODO: handle error
+            print("too few players to run scrimmages")
             return ""
 
         # get the ratings of the users specified in the list
         scrimmage_players = MatchRunner.get_match_players_info(
-            self.player_table, ranked_scrimmage.user_submissions
+            self.dynamodb_resource.Table(os.environ["AWS_PLAYER_TABLE_NAME"]),
+            ranked_scrimmage.user_submissions,
         )
 
         # set up a thread that will run the scrimmage matches
@@ -125,7 +129,9 @@ class RankedGameRunner:
                 self.match_runner_config,
                 self.tango,
                 self.s3_resource,
+                self.dynamodb_resource,
                 f"scrimmage_callback/{self.scrimmage_id}",
+                "ranked",
             )
             currMatch.sendJob()
 
@@ -152,8 +158,8 @@ class RankedGameRunner:
         updated_elos = {}
         for key, value in net_elo_changes.items():
             updated_elos[key] = players_map[key].rating + value
-        storageHandler = StorageHandler(self.s3_resource)
-        storageHandler.adjust_elo_table(self.player_table, updated_elos)
+        storageHandler = StorageHandler(dynamodb_resource=self.dynamodb_resource)
+        storageHandler.adjust_elo_table(updated_elos)
 
         # tournament has been completed; upload final tournament bracket onto s3
         print("completed scrimmage with following final elos: ")

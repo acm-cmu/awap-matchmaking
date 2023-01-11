@@ -9,7 +9,7 @@ import requests.exceptions as reqexc
 from typing import Any
 
 from server.tango import TangoInterface
-
+from server.storage_handler import StorageHandler, MatchTableSchema
 
 COURSE_LAB = "awap"
 MAKEFILE = "bots/autograde-Makefile"
@@ -50,10 +50,13 @@ class MatchRunner:
         match_runner_config: dict,
         tango: TangoInterface,
         s3_resource,
+        dynamodb_resource,
         callback_endpoint,
+        match_type,
     ):
         self.match = match
         self.s3 = s3_resource
+        self.dynamodb_resource = dynamodb_resource
         self.match_id = time.time_ns()
 
         self.files_param = [
@@ -64,6 +67,7 @@ class MatchRunner:
         self.tango = tango
         self.fastapi_host = match_runner_config["fastapi_host"]
         self.callback_endpoint = callback_endpoint
+        self.match_type = match_type
 
     def uploadFile(self, pathname: str) -> dict[str, str]:
         filename = pathname.split("/")[-1]
@@ -91,6 +95,17 @@ class MatchRunner:
             f"http://{self.fastapi_host}/{self.callback_endpoint}/{self.match_id}"
         )
         output_file = f"output-{self.match_id}.json"
+
+        # insert pending job into match table and return job id
+        storageHandler = StorageHandler(dynamodb_resource=self.dynamodb_resource)
+        storageHandler.insert_pending_match_into_table(
+            MatchTableSchema(
+                self.match_id,
+                team_1=self.match.user_submissions[0].username,
+                team_2=self.match.user_submissions[1].username,
+                type=self.match_type,
+            )
+        )
 
         return self.tango.add_job(
             str(self.match_id),

@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from server.game_engine import GameEngine, setup_game_engine
 from server.match_runner import Match, MatchRunner, UserSubmission
-from server.storage_handler import StorageHandler
+from server.storage_handler import StorageHandler, MatchTableSchema
 from server.tango import TangoInterface
 from server.ranked_game_runner import RankedGameRunner, RankedScrimmages
 from server.tournament_runner import TournamentRunner, Tournament
@@ -94,7 +94,10 @@ def read_root():
 def set_game_engine(new_engine: GameEngine):
     """
     This endpoint is used to set the game engine to be used for matches,
-    and the number of players in the match. It replaces currently set game engine.
+    and the number of players in the match.
+
+    It downloads the game engine and makefile from the provided links, and it sets
+    these files as the currently running game engine.
     """
     try:
         local_engine_path, local_makefile_path = setup_game_engine(
@@ -125,26 +128,25 @@ def set_game_engine(new_engine: GameEngine):
 @app.post("/match/")
 def run_single_match(match: Match):
     """
-    Run a single match with the given number of players and user submissions.
+    Run a single (unranked) match with the given number of players and user submissions.
 
     Used to run single scrimmage matches requested between teams. These matches are unranked
     and do not adjust elo.
 
     The number of players should match the number of user submissions, and match
     the number of players set in the game engine.
-    Check game engine name matches the game engine set in the game engine endpoint.
 
     The game engine should be set before calling this endpoint.
 
-    This endpoint should then send the user submissions, together with the game engine, to
-    the match runner, which will run the match and return the output.
+    The endpoint will instantly generate a match id, insert a "pending" row into the match
+    database table, and add the match to the job queue before returning.
 
-    IMPORTANT NOTE: You will likely handle this output in a separate callback endpoint!
+    Then, at some point in the future, the match will finish running. When that occurs, the
+    endpoint will upload the replay file to replay storage and update the match database
+    with the "finished" status and match results.
 
-    The output will consist of a replay file and a final score. The replay file should be uploaded
-    to the replay storage, and the final score & remote location of the replay should be added to the database.
-
-    Returns the if the match is successfully added to the queue, as well as the match id.
+    (notice that this endpoint will NOT notify the caller when the match is finished; it is
+    the responsibility of the caller to keep on checking the database to see if the match has finished.)
     """
     if app.engine is None:
         raise HTTPException(status_code=400, detail="Game engine not set yet")
@@ -173,7 +175,9 @@ def run_single_match(match: Match):
         ),
         app.tango,
         app.s3_resource,
+        app.dynamodb_resource,
         "single_match_callback",
+        "unranked",
     )
     return currMatch.sendJob()
 
@@ -181,27 +185,50 @@ def run_single_match(match: Match):
 @app.post("/single_match_callback/{match_id}")
 def run_single_match_callback(match_id: int, file: bytes = File()):
     """
+    (INTERNAL USE ONLY)
+
     Callback URL called by Tango when single unranked scrimmage match has finished running.
 
     Parses the resulting JSON object and places the returned replay file into S3 bucket.
 
-    Since match is unranked, no need to parse output / adjust rankings
+    Updates the match database; sets the match status to "finished" and updates outcome /
+    replay file location.
+
+    Since match is unranked, there is no need to parse output / adjust rankings
     """
     print("match_id: ", match_id)
     print("file_size:", len(file))
-    storageHandler = StorageHandler(app.s3_resource)
-    storageHandler.upload_replay(match_id, file, "unranked")
+    dest_filename = f"unranked-{match_id}.json"
+    storageHandler = StorageHandler(
+        s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
+    )
+    storageHandler.upload_replay(dest_filename, file)
+    storageHandler.update_finished_match_in_table(
+        MatchTableSchema(
+            match_id,
+            outcome="team1"
+            if storageHandler.get_winner_from_replay(file) == 1
+            else "team2",
+            replay_filename=dest_filename,
+        )
+    )
 
 
 @app.post("/scrimmage")
 def run_scrimmage(ranked_scrimmages: RankedScrimmages):
     """
-    Run a set of ranked scrimmages with the given user submissions and game engine.
+    Run a set of ranked scrimmages with the given user submissions and game engine. Elo is
+    adjusted according to match results.
 
-    Sets up scrimmage matches between the teams specified in the given request. The endpoint
-    should automatically determine 4-5 bots of similar elo for each bot and run these scrimmage matches.
-    Elo should be adjusted according to match results.
+    Sets up scrimmage matches between the teams specified in the given request. It automatically
+    determines 4 bots of similar elo for each individual one and runs these scrimmage matches. The endpoint
+    returns to caller if scrimmage has been successfully started.
 
+    (actual scrimmage matches will take some time; the endpoint will NOT notify the caller when
+    matches are finished running)
+
+    It will upload scrimmage replays to replay storage as matches finish running. It will update
+    elo once at the end of the scrimmage.
     """
     if app.engine is None:
         raise HTTPException(status_code=400, detail="Game engine not set yet")
@@ -229,15 +256,33 @@ def run_scrimmage(ranked_scrimmages: RankedScrimmages):
 @app.post("/scrimmage_callback/{scrimmage_id}/{match_id}")
 def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File()):
     """
+    (INTERNAL USE ONLY)
+
     Callback URL called by Tango when tournament match has finished running.
 
     Parses the resulting JSON object and places the returned replay file into S3 bucket.
 
-    Parse the results and put the winner into the "ongoing_tournaments" dict
+    Updates the match database; sets the match status to "finished" and updates outcome /
+    replay file location.
+
+    Parses the results and put the winner into the "ongoing_tournaments" dict
     """
     print("received scrimmage callback for match_id: ", match_id)
-    storageHandler = StorageHandler(app.s3_resource)
-    storageHandler.upload_replay(match_id, file, "ranked_scrimmage")
+    dest_filename = f"ranked_scrimmage-{match_id}.json"
+    storageHandler = StorageHandler(
+        s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
+    )
+    storageHandler.upload_replay(dest_filename, file)
+    storageHandler.update_finished_match_in_table(
+        MatchTableSchema(
+            match_id,
+            outcome="team1"
+            if storageHandler.get_winner_from_replay(file) == 1
+            else "team2",
+            replay_filename=dest_filename,
+        )
+    )
+
     app.ongoing_batch_match_runners_table[scrimmage_id][
         match_id
     ] = storageHandler.get_winner_from_replay(file)
@@ -246,7 +291,10 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
 @app.post("/tournament/")
 def run_tournament(tournament: Tournament):
     """
-    Run a tournament with the given user submissions and game engine.
+    Run a tournament with the given user submissions and game engine. Only the top
+    num_tournament_spots players will participate in the tournament. If there are
+    not enough players, the bracket will be padded with byes.
+
     Based on the number of players in the game engine, the user submissions will be
     split into matches, and each match will be added to the match queue.
     The winner of each match will then be added to the next match, until there is only
@@ -259,8 +307,6 @@ def run_tournament(tournament: Tournament):
     The bracket should look something like this for a 4 player tournament with 2 players in each match:
     bracket = [[match1, match2], [match3]]
     match1 = {"player1": "user1", "player2": "user2", "winner": "user1", "replay_remote_directory": "replay1"}
-
-    IMPORTANT NOTE: Likely requires you to create a separate thread to run the tournament, as it will take a while to run.
 
     Returns if the tournament is added to tournament queue, the tournament id.
     """
@@ -290,15 +336,33 @@ def run_tournament(tournament: Tournament):
 @app.post("/tournament_callback/{tournament_id}/{match_id}")
 def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = File()):
     """
+    (INTERNAL USE ONLY)
+
     Callback URL called by Tango when tournament match has finished running.
 
     Parses the resulting JSON object and places the returned replay file into S3 bucket.
 
-    Parse the results and put the winner into the "ongoing_tournaments" dict
+    Updates the match database; sets the match status to "finished" and updates outcome /
+    replay file location.
+
+    Parses the results and put the winner into the "ongoing_tournaments" dict
     """
     print("received tournament callback for match_id: ", match_id)
-    storageHandler = StorageHandler(app.s3_resource)
-    storageHandler.upload_replay(match_id, file, "tournament")
+    dest_filename = f"tournament-{match_id}.json"
+    storageHandler = StorageHandler(
+        s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
+    )
+    storageHandler.upload_replay(dest_filename, file)
+    storageHandler.update_finished_match_in_table(
+        MatchTableSchema(
+            match_id,
+            outcome="team1"
+            if storageHandler.get_winner_from_replay(file) == 1
+            else "team2",
+            replay_filename=dest_filename,
+        )
+    )
+
     app.ongoing_batch_match_runners_table[tournament_id][
         match_id
     ] = storageHandler.get_winner_from_replay(file)
