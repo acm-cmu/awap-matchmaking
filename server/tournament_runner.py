@@ -100,41 +100,54 @@ class TournamentRunner:
                     next_tournament_layer.append(actual_player)
                     continue
 
-                match = Match(
-                    game_engine_name=tournament.game_engine_name,
-                    num_players=2,  # TODO: tournament just assumes 1v1 for now
-                    user_submissions=[
-                        curr_tournament_layer[i].user_info,
-                        curr_tournament_layer[i + 1].user_info,
-                    ],
-                )
+                # TODO: assume Bo5 for now
+                player1Wins = 0
+                player2Wins = 0
+                replayLocations = []
 
-                currMatch = MatchRunner(
-                    match,
-                    self.match_runner_config,
-                    self.tango,
-                    self.s3_resource,
-                    self.dynamodb_resource,
-                    f"tournament_callback/{self.tournament_id}",
-                    "tournament",
-                )
-                currMatch.sendJob()
+                while player1Wins < 3 and player2Wins < 3:
+                    match = Match(
+                        game_engine_name=tournament.game_engine_name,
+                        num_players=2,  # TODO: tournament just assumes 1v1 for now
+                        user_submissions=[
+                            curr_tournament_layer[i].user_info,
+                            curr_tournament_layer[i + 1].user_info,
+                        ],
+                    )
 
-                # wait for the match to finish
-                while (
-                    currMatch.match_id
-                    not in self.ongoing_batch_match_runners_table[self.tournament_id]
-                ):
-                    pass
+                    currMatch = MatchRunner(
+                        match,
+                        self.match_runner_config,
+                        self.tango,
+                        self.s3_resource,
+                        self.dynamodb_resource,
+                        f"tournament_callback/{self.tournament_id}",
+                        "tournament",
+                    )
+                    currMatch.sendJob()
+
+                    # wait for the match to finish
+                    while (
+                        currMatch.match_id
+                        not in self.ongoing_batch_match_runners_table[
+                            self.tournament_id
+                        ]
+                    ):
+                        pass
+
+                    # TODO: assume winner is either 1 or 2, so winner_id either 0 or 1
+                    winner_id = self.ongoing_batch_match_runners_table[
+                        self.tournament_id
+                    ][currMatch.match_id]
+                    if winner_id == 1:
+                        player1Wins += 1
+                    else:
+                        player2Wins += 1
+
+                    replayLocations.append(f"tournament-{currMatch.match_id}.json")
 
                 # add the winner to the next tournament layer
-                # TODO: assume winner is either 1 or 2 right now
-                winner_id = (
-                    self.ongoing_batch_match_runners_table[self.tournament_id][
-                        currMatch.match_id
-                    ]
-                    - 1
-                )
+                winner_id = 0 if player1Wins == 3 else 1
                 next_tournament_layer.append(curr_tournament_layer[i + winner_id])
 
                 curr_tournament_layer_results.append(
@@ -144,7 +157,7 @@ class TournamentRunner:
                         "winner": curr_tournament_layer[
                             i + winner_id
                         ].user_info.username,
-                        "replay_filename": f"tournament-{currMatch.match_id}.json",
+                        "replay_filenames": replayLocations,
                     }
                 )
 
