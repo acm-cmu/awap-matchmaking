@@ -3,7 +3,7 @@ import json
 import tempfile
 from datetime import datetime
 
-# fields can sometime be left empty / unused, depending on what fields need to be accessed in database
+# fields can sometime be left empty / unused, depending on what fields need to be accessed/updated in database
 class MatchTableSchema:
     match_id: int
     team_1: str
@@ -11,6 +11,7 @@ class MatchTableSchema:
     type: str  # [unranked, ranked, tournament]
     status: str  # [pending, finished]
     outcome: str  # [team_1, team_2]
+    elo_change: int  # winner receives + elo_change, loser receives - elo_change
     replay_filename: str
 
     def __init__(
@@ -22,6 +23,7 @@ class MatchTableSchema:
         status="",
         outcome="",
         replay_filename="",
+        elo_change=0,
     ):
         self.match_id = match_id
         self.team_1 = team_1
@@ -30,6 +32,7 @@ class MatchTableSchema:
         self.status = status
         self.outcome = outcome
         self.replay_filename = replay_filename
+        self.elo_change = elo_change
 
 
 # class for all logic regarding uploading/downloading files from s3, as well as working with and parsing files
@@ -100,6 +103,7 @@ class StorageHandler:
                     "MATCH_STATUS": "pending",
                     "OUTCOME": "",
                     "REPLAY_FILENAME": "",
+                    "ELO_CHANGE": 0,
                 }
             )
         except Exception as e:
@@ -114,11 +118,12 @@ class StorageHandler:
         try:
             curr_match_table.update_item(
                 Key={"MATCH_ID": match_info.match_id},
-                UpdateExpression="set MATCH_STATUS=:s, OUTCOME=:o, REPLAY_FILENAME=:r",
+                UpdateExpression="set MATCH_STATUS=:s, OUTCOME=:o, REPLAY_FILENAME=:r, ELO_CHANGE=:e",
                 ExpressionAttributeValues={
                     ":s": "finished",
                     ":o": match_info.outcome,
                     ":r": match_info.replay_filename,
+                    ":e": match_info.elo_change,
                 },
             )
         except Exception as e:

@@ -3,7 +3,7 @@ import math
 from threading import Thread
 from pydantic import BaseModel
 from server.match_runner import UserSubmission, MatchRunner, Match, MatchPlayer
-from server.storage_handler import StorageHandler
+from server.storage_handler import StorageHandler, MatchTableSchema
 
 
 class Tournament(BaseModel):
@@ -75,7 +75,9 @@ class TournamentRunner:
             )
 
         complete_tournament_results = []
-
+        storageHandler = StorageHandler(
+            s3_resource=self.s3_resource, dynamodb_resource=self.dynamodb_resource
+        )
         while len(curr_tournament_layer) > 1:
             next_tournament_layer = []
             curr_tournament_layer_results = []
@@ -145,6 +147,15 @@ class TournamentRunner:
                         player2Wins += 1
 
                     replayLocations.append(f"tournament-{currMatch.match_id}.json")
+
+                    # update match table with finished match results
+                    storageHandler.update_finished_match_in_table(
+                        MatchTableSchema(
+                            currMatch.match_id,
+                            outcome="team1" if player1Wins else "team2",
+                            replay_filename=f"tournament-{currMatch.match_id}.json",
+                        ),
+                    )
 
                 # add the winner to the next tournament layer
                 winner_id = 0 if player1Wins == 3 else 1

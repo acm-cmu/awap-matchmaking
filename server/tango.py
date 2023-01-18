@@ -23,10 +23,12 @@ class TangoInterface:
             )
             response.raise_for_status()
         except reqexc.ConnectionError as exc:
+            print("Could not connect to Tango")
             raise HTTPException(
                 status_code=500, detail="Could not connect to Tango"
             ) from exc
         except reqexc.HTTPError as exc:
+            print(exc)
             raise HTTPException(
                 status_code=500, detail=f"Error from tango: {str(exc)}"
             ) from exc

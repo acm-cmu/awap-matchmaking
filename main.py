@@ -273,15 +273,6 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
     storageHandler.upload_replay(dest_filename, file)
-    storageHandler.update_finished_match_in_table(
-        MatchTableSchema(
-            match_id,
-            outcome="team1"
-            if storageHandler.get_winner_from_replay(file) == 1
-            else "team2",
-            replay_filename=dest_filename,
-        )
-    )
 
     app.ongoing_batch_match_runners_table[scrimmage_id][
         match_id
@@ -353,15 +344,6 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
     storageHandler.upload_replay(dest_filename, file)
-    storageHandler.update_finished_match_in_table(
-        MatchTableSchema(
-            match_id,
-            outcome="team1"
-            if storageHandler.get_winner_from_replay(file) == 1
-            else "team2",
-            replay_filename=dest_filename,
-        )
-    )
 
     app.ongoing_batch_match_runners_table[tournament_id][
         match_id

@@ -3,7 +3,13 @@
 import os
 from threading import Thread
 from pydantic import BaseModel
-from server.match_runner import UserSubmission, MatchRunner, Match, MatchPlayer
+from server.match_runner import (
+    UserSubmission,
+    MatchRunner,
+    Match,
+    MatchPlayer,
+    MatchTableSchema,
+)
 from server.storage_handler import StorageHandler
 
 
@@ -114,6 +120,9 @@ class RankedGameRunner:
         print(matches)
 
         # run the matches
+        storageHandler = StorageHandler(
+            s3_resource=self.s3_resource, dynamodb_resource=self.dynamodb_resource
+        )
         for (player_1_name, player_2_name) in matches:
             player_1 = players_map[player_1_name]
             player_2 = players_map[player_2_name]
@@ -153,6 +162,16 @@ class RankedGameRunner:
             )
             net_elo_changes[player_1_name] += player_1_change
             net_elo_changes[player_2_name] += player_2_change
+
+            # update the table with final match results
+            storageHandler.update_finished_match_in_table(
+                MatchTableSchema(
+                    currMatch.match_id,
+                    outcome="team1" if winner_is_player_1 else "team2",
+                    replay_filename=f"ranked_scrimmage-{currMatch.match_id}.json",
+                    elo_change=abs(player_1_change),
+                )
+            )
 
         # apply all the changes in net_elo_changes
         updated_elos = {}
