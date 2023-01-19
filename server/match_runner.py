@@ -47,6 +47,7 @@ class MatchRunner:
     def __init__(
         self,
         match: Match,
+        match_id: int,
         match_runner_config: dict,
         tango: TangoInterface,
         s3_resource,
@@ -57,7 +58,7 @@ class MatchRunner:
         self.match = match
         self.s3 = s3_resource
         self.dynamodb_resource = dynamodb_resource
-        self.match_id = time.time_ns()
+        self.match_id = match_id
 
         self.files_param = [
             match_runner_config.get("makefile"),

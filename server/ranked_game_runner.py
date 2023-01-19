@@ -11,6 +11,7 @@ from server.match_runner import (
     MatchTableSchema,
 )
 from server.storage_handler import StorageHandler
+from util import AtomicCounter
 
 
 class RankedScrimmages(BaseModel):
@@ -21,10 +22,12 @@ class RankedScrimmages(BaseModel):
 class Elo:
     k = 20
 
+    @staticmethod
     def calc_expected_score(first_elo: int, second_elo: int):
         return 1 / (1 + pow(10, (second_elo - first_elo) / 400))
 
     # returns tuple representing (change to first team's elo, change to second team's elo)
+    @staticmethod
     def calc_elo_change(first_elo: int, second_elo: int, first_team_won: bool):
         score = 1 if first_team_won else 0
         expected_score = Elo.calc_expected_score(first_elo, second_elo)
@@ -39,6 +42,7 @@ class RankedGameRunner:
     def __init__(
         self,
         dynamodb_resource,
+        match_counter: AtomicCounter,
         scrimmage_id,
         ongoing_batch_match_runners,
         match_runner_config,
@@ -46,6 +50,7 @@ class RankedGameRunner:
         s3_resource,
     ):
         self.scrimmage_id = scrimmage_id
+        self.match_counter = match_counter
 
         # global table mapping: scrimmage -> match_id -> winner
         # the match callback will update this map, and the scrimmage will wait until the matchid appears in the dict
@@ -135,6 +140,7 @@ class RankedGameRunner:
 
             currMatch = MatchRunner(
                 match,
+                next(self.match_counter),
                 self.match_runner_config,
                 self.tango,
                 self.s3_resource,

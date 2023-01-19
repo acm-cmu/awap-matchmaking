@@ -130,3 +130,17 @@ class StorageHandler:
             print("issue with updating pending match to finished in table")
             print(e)
             pass
+
+    def get_next_match_id(self) -> int:
+        curr_match_table = self.dynamodb_resource.Table(
+            os.environ["AWS_MATCH_TABLE_NAME"]
+        )
+
+        entries = curr_match_table.scan(
+            Select="SPECIFIC_ATTRIBUTES", ProjectionExpression="MATCH_ID"
+        )
+
+        if entries["Count"] == 0:
+            return 1
+
+        return 1 + max(x["MATCH_ID"] for x in entries["Items"])
