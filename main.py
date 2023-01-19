@@ -15,6 +15,7 @@ from server.storage_handler import StorageHandler, MatchTableSchema
 from server.tango import TangoInterface
 from server.ranked_game_runner import RankedGameRunner, RankedScrimmages
 from server.tournament_runner import TournamentRunner, Tournament
+from util import AtomicCounter
 
 
 class API(FastAPI):
@@ -27,6 +28,7 @@ class API(FastAPI):
     tango: TangoInterface
 
     ongoing_batch_match_runners_table: dict[int, dict[int, str]]
+    match_counter: AtomicCounter
 
     def __init__(self):
         super().__init__()
@@ -83,6 +85,11 @@ def connect_to_dynamodb():
         aws_access_key_id=_client_key,
         aws_secret_access_key=_client_secret,
     )
+
+    handler = StorageHandler(dynamodb_resource=app.dynamodb_resource)
+    next_match_id = handler.get_next_match_id()
+    print(next_match_id)
+    app.match_counter = AtomicCounter(next_match_id)
 
 
 @app.get("/")
@@ -168,6 +175,7 @@ def run_single_match(match: Match):
 
     currMatch = MatchRunner(
         match,
+        next(app.match_counter),
         dict(
             makefile=app.makefile,
             engine=app.engine_filename,
@@ -239,6 +247,7 @@ def run_scrimmage(ranked_scrimmages: RankedScrimmages):
     scrimmage_id = time_ns()
     rankedGameRunner = RankedGameRunner(
         app.dynamodb_resource,
+        app.match_counter,
         scrimmage_id,
         app.ongoing_batch_match_runners_table,
         dict(
@@ -310,6 +319,7 @@ def run_tournament(tournament: Tournament):
     tournament_id = time_ns()
     rankedGameRunner = TournamentRunner(
         app.dynamodb_resource,
+        app.match_counter,
         tournament_id,
         app.ongoing_batch_match_runners_table,
         dict(

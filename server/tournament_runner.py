@@ -4,6 +4,7 @@ from threading import Thread
 from pydantic import BaseModel
 from server.match_runner import UserSubmission, MatchRunner, Match, MatchPlayer
 from server.storage_handler import StorageHandler, MatchTableSchema
+from util import AtomicCounter
 
 
 class Tournament(BaseModel):
@@ -16,6 +17,7 @@ class TournamentRunner:
     def __init__(
         self,
         dynamodb_resource,
+        match_counter: AtomicCounter,
         tournament_id,
         ongoing_batch_match_runners,
         match_runner_config,
@@ -23,6 +25,7 @@ class TournamentRunner:
         s3_resource,
     ):
         self.tournament_id = tournament_id
+        self.match_counter = match_counter
 
         # global table mapping: tournament_id -> match_id -> winner
         # the match callback will update this map, and the tournament will wait until the matchid appears in the dict
@@ -119,6 +122,7 @@ class TournamentRunner:
 
                     currMatch = MatchRunner(
                         match,
+                        self.match_counter,
                         self.match_runner_config,
                         self.tango,
                         self.s3_resource,
