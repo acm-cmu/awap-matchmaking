@@ -8,3 +8,4 @@ jobs:
       - name: echo something
         run: |
            echo "hello"
+           echo ${{ secrets.TEST }}
