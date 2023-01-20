@@ -16,9 +16,10 @@ jobs:
         script: |
            source /matchmaking/bin/activate
             cd awap-matchmaking
-            jobs -p | xargs kill
+            PID_FASTAPI=$(lsof -i:8000 -t)
+            kill -9 $PID_FASTAPI
             git pull
             docker compose up -d
             ./run-fastapi.sh ***REMOVED*** & 
-         
+
           
