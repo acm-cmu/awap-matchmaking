@@ -14,6 +14,11 @@ jobs:
         key: ${{ secrets.EC2_SSH_KEY }}
         port: 22
         script: |
-          ls
+           source /matchmaking/bin/activate
+          cd awap-matchmaking
+          jobs -p | xargs kill
+          git pull
+          docker compose up -d
+          ./run-fastapi.sh ***REMOVED*** & 
          
           
