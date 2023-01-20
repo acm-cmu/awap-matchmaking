@@ -13,9 +13,6 @@ jobs:
         username: ${{ secrets.USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          source /matchmaking/bin/activate
-          cd awap-matchmaking
-          git pull
-          docker compose up -d
-          ./run-fastapi.sh 52.23.23.233
+          ls
+         
           
