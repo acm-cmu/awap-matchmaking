@@ -15,10 +15,10 @@ jobs:
         port: 22
         script: |
            source /matchmaking/bin/activate
-          cd awap-matchmaking
-          jobs -p | xargs kill
-          git pull
-          docker compose up -d
-          ./run-fastapi.sh 52.23.23.233 & 
+            cd awap-matchmaking
+            jobs -p | xargs kill
+            git pull
+            docker compose up -d
+            ./run-fastapi.sh 52.23.23.233 & 
          
           
