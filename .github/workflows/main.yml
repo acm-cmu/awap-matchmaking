@@ -1,11 +1,21 @@
-name: Echo something
-on: [workflow_dispatch]
+name: remote ssh command
+on: [push]
 jobs:
+
   build:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      - name: echo something
-        run: |
-           echo "hello"
-           echo ${{ secrets.TEST }}
+    - name: executing remote ssh commands using password
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          source /matchmaking/bin/activate
+          cd awap-matchmaking
+          git pull
+          docker compose up -d
+          ./run-fastapi.sh 52.23.23.233
+          
