@@ -29,27 +29,27 @@ This project uses python3 and virtualenv to manage a separate python environment
 
    - `RESTFUL_KEY`
 
-      This is key used for Tango. It can arbitrarily be set to "test" during testing, but will need to be changed for production.
+     This is key used for Tango. It can arbitrarily be set to "test" during testing, but will need to be changed for production.
 
    - `TANGO_HOSTNAME`
 
-      This is your computer's ip address (see below). For local testing, it should take the form "http://[your ip address]"
+     This is your computer's ip address (see below). For local testing, it should take the form "http://[your ip address]"
 
    - `AWS_CLIENT_KEY`
 
-      This is the AWS access key ID. You can find this in the permissions file on Google Drive.
+     This is the AWS access key ID. You can find this in the permissions file on Google Drive.
 
    - `AWS_CLIENT_SECRET`
 
-      This is the secret AWS access key. This can also be found in the permissions file on Google Drive.
+     This is the secret AWS access key. This can also be found in the permissions file on Google Drive.
 
    - `AWS_REPLAY_BUCKET_NAME`
 
-      This is the folder on s3 that replays are uploaded into.
+     This is the folder on s3 that replays are uploaded into.
 
    - `AWS_PLAYER_TABLE_NAME`
 
-      This is the table on dynamoDB on AWS that stores player info (team name, rating, ...)
+     This is the table on dynamoDB on AWS that stores player info (team name, rating, ...)
 
    The other settings may be edited as necessary.
 
@@ -102,6 +102,7 @@ We are currently using docker to help containerize Tango (&redis). You will need
 7. In the future, you only need to do step 5 to get the services up. You can also run the services from the images section of your Docker Dashboard.
 
 # Usage
+
 Run the matchmaking server using the two commands in two different terminals, as mentioned above:
 
 `docker compose up`
@@ -125,7 +126,7 @@ body:
 
 The makefile should contain the commands used to run the game. It is executed every time a match is run (so it should include commands such as `python3 run_game_file.py`, for example). An example game `simple.py` and `autograde-Makefile` are on S3 (maybe).
 
-If there are multiple files in the game engine, then maybe you should tar the game engine file and include an untarring command in the makefile.  ?
+If there are multiple files in the game engine, then maybe you should tar the game engine file and include an untarring command in the makefile. ?
 
 Now, you can run a single scrimmage match between two teams using the following endpoint:
 
@@ -153,6 +154,7 @@ body:
 This will upload the bots to Tango and run the commands in the makefile. The autograder output gets uploaded to S3 in the replays bucket specified by `AWS_REPLAY_BUCKET_NAME` in the .env file.
 
 You can run a tournament using the following endpoint:
+
 ```
 POST: http://localhost:8000/tournament
 body:
@@ -178,7 +180,9 @@ body:
     ]
 }
 ```
+
 The endpoint will lookup the usernames on the database and seed the teams in a bracket according to their rating. It will place the replay files into the replay bucket with the filename `tournament-[match-id].json`. It will also upload a summary of the tournament bracket into the replay bucket with the filename `tournament_bracket-[tournament_id].json`. The tournament summary might take the following format for a bracket with 3 teams, for example:
+
 ```
 [
    [
@@ -192,6 +196,7 @@ The endpoint will lookup the usernames on the database and seed the teams in a b
 ```
 
 Similarly, you can run a batch of ranked scrimmages using the following endpoint:
+
 ```
 POST: http://localhost:8000/scrimmage
 body:
@@ -218,4 +223,17 @@ body:
     ]
 }
 ```
+
 The endpoint will lookup the usernames and ratings on the database and run scrimmage matches between teams with similar ratings. It will place the replay files into the replay bucket with the filename `ranked_scrimmage-[match-id].json` and adjust the elo according to winners/losers from each match.
+
+## Deleting old files
+
+To delete all Python files with a leading number in the file name (e.g. `123-team1.py`) **accessed** more than 60 minutes ago in a target directory, run:
+
+```bash
+find . -type f -name "[1234567890]*.py" -amin +60 -delete
+```
+
+(Replace `-delete` with `-print` to preview the list of files to delete)
+
+For now we don't automatically delete any old submissions on the Docker job manager container.
