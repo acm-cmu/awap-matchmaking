@@ -19,7 +19,7 @@ jobs:
             PID_FASTAPI=$(lsof -i:8000 -t)
             kill -9 $PID_FASTAPI
             git pull
-            docker compose up -d
+            sudo docker compose up -d
             ./run-fastapi.sh 52.23.23.233 & 
 
           
