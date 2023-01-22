@@ -14,7 +14,7 @@ jobs:
         key: ${{ secrets.EC2_SSH_KEY }}
         port: 22
         script: |
-           source ./matchmaking/bin/activate
+            source ./matchmaking/bin/activate
             cd awap-matchmaking
             PID_FASTAPI=$(lsof -i:8000 -t)
             kill -9 $PID_FASTAPI
