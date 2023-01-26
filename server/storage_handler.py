@@ -33,7 +33,6 @@ class MatchTableSchema:
         self.outcome = outcome
         self.replay_filename = replay_filename
         self.elo_change = elo_change
-        self.last_updated = datetime.now().isoformat()
 
 
 # class for all logic regarding uploading/downloading files from s3, as well as working with and parsing files
