@@ -33,6 +33,7 @@ class MatchTableSchema:
         self.outcome = outcome
         self.replay_filename = replay_filename
         self.elo_change = elo_change
+        self.last_updated = datetime.now().isoformat()
 
 
 # class for all logic regarding uploading/downloading files from s3, as well as working with and parsing files
@@ -104,12 +105,12 @@ class StorageHandler:
                     "OUTCOME": "",
                     "REPLAY_FILENAME": "",
                     "ELO_CHANGE": 0,
+                    "LAST_UPDATED": datetime.today().isoformat(),
                 }
             )
         except Exception as e:
             print("issue with inserting pending match into table")
             print(e)
-            pass
 
     def update_finished_match_in_table(self, match_info: MatchTableSchema):
         curr_match_table = self.dynamodb_resource.Table(
@@ -118,18 +119,18 @@ class StorageHandler:
         try:
             curr_match_table.update_item(
                 Key={"MATCH_ID": match_info.match_id},
-                UpdateExpression="set MATCH_STATUS=:s, OUTCOME=:o, REPLAY_FILENAME=:r, ELO_CHANGE=:e",
+                UpdateExpression="set MATCH_STATUS=:s, OUTCOME=:o, REPLAY_FILENAME=:r, ELO_CHANGE=:e, LAST_UPDATED=:t",
                 ExpressionAttributeValues={
                     ":s": "finished",
                     ":o": match_info.outcome,
                     ":r": match_info.replay_filename,
                     ":e": match_info.elo_change,
+                    ":t": datetime.today().isoformat(),
                 },
             )
         except Exception as e:
             print("issue with updating pending match to finished in table")
             print(e)
-            pass
 
     def get_next_match_id(self) -> int:
         curr_match_table = self.dynamodb_resource.Table(
