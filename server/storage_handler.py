@@ -13,6 +13,7 @@ class MatchTableSchema:
     outcome: str  # [team_1, team_2]
     elo_change: int  # winner receives + elo_change, loser receives - elo_change
     replay_filename: str
+    map_name: str
 
     def __init__(
         self,
@@ -24,6 +25,7 @@ class MatchTableSchema:
         outcome="",
         replay_filename="",
         elo_change=0,
+        map_name="",
     ):
         self.match_id = match_id
         self.team_1 = team_1
@@ -33,6 +35,7 @@ class MatchTableSchema:
         self.outcome = outcome
         self.replay_filename = replay_filename
         self.elo_change = elo_change
+        self.map_name = map_name
 
 
 # class for all logic regarding uploading/downloading files from s3, as well as working with and parsing files
@@ -105,6 +108,7 @@ class StorageHandler:
                     "REPLAY_FILENAME": "",
                     "ELO_CHANGE": 0,
                     "LAST_UPDATED": datetime.today().isoformat(),
+                    "MAP_NAME": match_info.map_name,
                 }
             )
         except Exception as e:
