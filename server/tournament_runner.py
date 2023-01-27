@@ -124,8 +124,12 @@ class TournamentRunner:
                 layer_maps = self.match_map_order[
                     layer % num_specified_layer_maps
                 ]  # we loop back if not enough layers are specified
+                print(layer_maps)
                 num_matches = len(layer_maps)
-                num_wins_req = num_matches / 2 + 1
+                num_wins_req = num_matches // 2 + 1
+                print(
+                    f"playing up to {num_matches} matches, {num_wins_req} wins requried"
+                )
 
                 player1Wins = 0
                 player2Wins = 0
@@ -142,6 +146,8 @@ class TournamentRunner:
                             curr_tournament_layer[i + 1].user_info,
                         ],
                     )
+
+                    print("map_num", map_num)
 
                     currMatch = MatchRunner(
                         match,
