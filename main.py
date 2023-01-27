@@ -3,6 +3,7 @@ import os
 from socket import socket
 from time import time_ns
 from typing import Optional, Union, overload
+from decode_replay import parse_tango_output
 
 from fastapi import FastAPI, HTTPException, Response, status, File
 from pydantic import BaseModel, BaseSettings
@@ -223,16 +224,11 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
     storageHandler = StorageHandler(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
-    storageHandler.upload_replay(dest_filename, file)
-    storageHandler.update_finished_match_in_table(
-        MatchTableSchema(
-            match_id,
-            outcome="team1"
-            if storageHandler.get_winner_from_replay(file) == 1
-            else "team2",
-            replay_filename=dest_filename,
-        )
-    )
+
+    try:
+        storageHandler.process_replay(file, dest_filename)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Bad replay from tango") from exc
 
 
 @app.post("/scrimmage")
@@ -297,11 +293,12 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
     storageHandler = StorageHandler(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
-    storageHandler.upload_replay(dest_filename, file)
 
-    app.ongoing_batch_match_runners_table[scrimmage_id][
-        match_id
-    ] = storageHandler.get_winner_from_replay(file)
+    try:
+        winner = storageHandler.process_replay(file, dest_filename)
+        app.ongoing_batch_match_runners_table[scrimmage_id][match_id] = winner
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Malformed tango output") from exc
 
 
 @app.post("/tournament/")
@@ -370,8 +367,9 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
     storageHandler = StorageHandler(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
-    storageHandler.upload_replay(dest_filename, file)
 
-    app.ongoing_batch_match_runners_table[tournament_id][
-        match_id
-    ] = storageHandler.get_winner_from_replay(file)
+    try:
+        winner = storageHandler.process_replay(file, dest_filename)
+        app.ongoing_batch_match_runners_table[tournament_id][match_id] = winner
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Bad tango output") from exc
