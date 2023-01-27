@@ -120,7 +120,16 @@ body:
     "engine_download_url": [presigned URL from above],
     "makefile_filename": [filename for makefile on s3],
     "makefile_download_url: [presigned URL from above],
-    "num_players": [number of players for each game]
+    "num_players": [number of players for each game],
+    "map_choice": {
+        "unranked_possible_maps": [names of maps],
+        "ranked_possible_maps": [names of maps],
+        "tourney_map_order": [
+            [names of maps for 1st layer],
+            [names of maps for 2nd layer],
+            ...
+        ]
+    }
 }
 ```
 
@@ -160,6 +169,7 @@ POST: http://localhost:8000/tournament
 body:
 {
    "game_engine_name": "name specified in previous step",
+   "num_tournament_spots": 8,
    "user_submissions": [
         {
             "username": "testteam1",
@@ -202,7 +212,6 @@ POST: http://localhost:8000/scrimmage
 body:
 {
    "game_engine_name": "name specified in previous step",
-   "num_tournament_spots": 8,
    "user_submissions": [
         {
             "username": "testteam1",

@@ -46,6 +46,17 @@ class StorageHandler:
         self.s3 = s3_resource
         self.dynamodb_resource = dynamodb_resource
 
+    # DEPRECATED
+    def upload_replay(self, dest_filename: str, replay_file: bytes):
+        # write to a temporary local file, then upload to s3
+        with tempfile.TemporaryDirectory() as tempdir:
+            local_path = os.path.join(tempdir, dest_filename)
+            with open(local_path, "w") as outfile:
+                outfile.write(replay_file.decode("utf-8"))
+            self.s3.upload_file(
+                local_path, os.environ["AWS_REPLAY_BUCKET_NAME"], dest_filename
+            )
+
     def upload_tournament_bracket(
         self, tournament_id: int, tournament_bracket: list[list[dict[str, str]]]
     ):
@@ -55,11 +66,16 @@ class StorageHandler:
         # write to a temporary local file, then upload to s3
         with tempfile.TemporaryDirectory() as tempdir:
             local_path = os.path.join(tempdir, dest_filename)
-            with open(local_path, "w", encoding="utf-8") as outfile:
+            with open(local_path, "w") as outfile:
                 outfile.write(json_object)
             self.s3.upload_file(
                 local_path, os.environ["AWS_REPLAY_BUCKET_NAME"], dest_filename
             )
+
+    # DEPRECATED
+    def get_winner_from_replay(self, replay_file: bytes):
+        result = json.loads(replay_file.decode("utf-8").split("\n")[-2])
+        return result["scores"]["Outcome"]
 
     def process_replay(self, tango_output: bytes, dest_filename: str) -> int:
         """
@@ -67,7 +83,7 @@ class StorageHandler:
         """
         replay_line = parse_tango_output(tango_output)
 
-        with tempfile.NamedTemporaryFile() as replay_file:
+        with tempfile.NamedTemporaryFile(mode="w") as replay_file:
             replay_file.write(replay_line)
             self.s3.upload_file(
                 replay_file.name, os.environ["AWS_REPLAY_BUCKET_NAME"], dest_filename

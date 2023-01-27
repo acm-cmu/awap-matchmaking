@@ -186,6 +186,8 @@ def run_single_match(match: Match):
             status_code=400, detail="Number of users should match number of submissions"
         )
 
+    map_chosen = choose_map(app.maps, MatchType.UNRANKED)
+
     currMatch = MatchRunner(
         match,
         next(app.match_counter),
@@ -199,7 +201,7 @@ def run_single_match(match: Match):
         app.dynamodb_resource,
         "single_match_callback",
         MatchType.UNRANKED,
-        game_map=choose_map(app.maps, MatchType.UNRANKED),
+        game_map=map_chosen,
     )
     return currMatch.sendJob()
 
@@ -226,7 +228,12 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
     )
 
     try:
-        storageHandler.process_replay(file, dest_filename)
+        winner = storageHandler.process_replay(file, dest_filename)
+        storageHandler.update_finished_match_in_table(
+            MatchTableSchema(
+                match_id, outcome="team" + str(winner), replay_filename=dest_filename
+            )
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Bad replay from tango") from exc
 
