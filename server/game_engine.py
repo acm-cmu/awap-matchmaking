@@ -1,7 +1,16 @@
 import os
+import random
 
 from pydantic import BaseModel
 import requests
+
+from server.match_runner import MatchType
+
+
+class MapSelection(BaseModel):
+    unranked_possible_maps: list[str]
+    ranked_possible_maps: list[str]
+    tourney_map_order: list[list[str]]
 
 
 class GameEngine(BaseModel):
@@ -11,6 +20,7 @@ class GameEngine(BaseModel):
     makefile_filename: str
     makefile_download_url: str
     num_players: int
+    map_choice: MapSelection
 
 
 def setup_game_engine(game_engine: GameEngine, data_dir: str):
@@ -32,3 +42,11 @@ def setup_game_engine(game_engine: GameEngine, data_dir: str):
         file.write(response.content)
 
     return engine_path, makefile_path
+
+
+def choose_map(map_selection: MapSelection, match_type: MatchType) -> str:
+    if match_type == MatchType.UNRANKED:
+        return random.choice(map_selection.unranked_possible_maps)
+    if match_type == MatchType.RANKED:
+        return random.choice(map_selection.ranked_possible_maps)
+    raise Exception("dont use this for Tournament")

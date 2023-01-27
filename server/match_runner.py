@@ -1,3 +1,4 @@
+from enum import Enum
 import tempfile
 import time
 from fastapi import HTTPException
@@ -6,7 +7,7 @@ import requests
 import boto3
 import os
 import requests.exceptions as reqexc
-from typing import Any
+from typing import Any, Optional
 
 from server.tango import TangoInterface
 from server.storage_handler import StorageHandler, MatchTableSchema
@@ -36,13 +37,21 @@ class MatchPlayer:
         self.rating = rating
 
 
+class MatchType(Enum):
+    UNRANKED = 1
+    RANKED = 2
+    TOURNAMENT = 3
+
+
 class MatchRunner:
     match: Match
     tango: TangoInterface
+    match_type: MatchType
 
     files_param: list
 
     callback_endpoint: str
+    game_map: str
 
     def __init__(
         self,
@@ -53,7 +62,8 @@ class MatchRunner:
         s3_resource,
         dynamodb_resource,
         callback_endpoint,
-        match_type,
+        match_type: MatchType,
+        game_map: str,
     ):
         self.match = match
         self.s3 = s3_resource
@@ -69,6 +79,7 @@ class MatchRunner:
         self.fastapi_host = match_runner_config["fastapi_host"]
         self.callback_endpoint = callback_endpoint
         self.match_type = match_type
+        self.game_map = game_map
 
     def uploadFile(self, pathname: str) -> dict[str, str]:
         filename = pathname.split("/")[-1]
@@ -92,6 +103,11 @@ class MatchRunner:
                 )
                 self.files_param.append(self.uploadFile(local_path))
 
+            config_path = os.path.join(tempdir, "config.txt")
+            with open(config_path, "w", encoding="utf-8") as config_f:
+                config_f.write(self.game_map)
+            self.files_param.append(self.uploadFile(config_path))
+
         callback_url = (
             f"http://{self.fastapi_host}/{self.callback_endpoint}/{self.match_id}"
         )
@@ -104,7 +120,8 @@ class MatchRunner:
                 self.match_id,
                 team_1=self.match.user_submissions[0].username,
                 team_2=self.match.user_submissions[1].username,
-                type=self.match_type,
+                type=self.match_type.name.lower(),
+                map_name=self.game_map,
             )
         )
 
