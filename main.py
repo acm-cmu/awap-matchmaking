@@ -3,14 +3,15 @@ import os
 from socket import socket
 from time import time_ns
 from typing import Optional, Union, overload
+from decode_replay import parse_tango_output
 
 from fastapi import FastAPI, HTTPException, Response, status, File
 from pydantic import BaseModel, BaseSettings
 import boto3
 from dotenv import load_dotenv
 
-from server.game_engine import GameEngine, setup_game_engine
-from server.match_runner import Match, MatchRunner, UserSubmission
+from server.game_engine import GameEngine, MapSelection, choose_map, setup_game_engine
+from server.match_runner import Match, MatchRunner, MatchType, UserSubmission
 from server.storage_handler import StorageHandler, MatchTableSchema
 from server.tango import TangoInterface
 from server.ranked_game_runner import RankedGameRunner, RankedScrimmages
@@ -21,6 +22,8 @@ from util import AtomicCounter
 class API(FastAPI):
     engine: Optional[GameEngine]
     engine_filename: Optional[dict[str, str]]
+    maps: Optional[MapSelection]
+
     makefile: dict[str, str]
 
     temp_file_dir: str
@@ -34,6 +37,7 @@ class API(FastAPI):
         super().__init__()
         self.engine = None
         self.s3_resource = None
+        self.maps = None
         self.dynamodb_resource = None
         self.engine_filename = None
         load_dotenv()
@@ -129,6 +133,15 @@ def set_game_engine(new_engine: GameEngine):
         local_makefile_path, "autograde-Makefile", "Makefile"
     )
 
+    for layer in new_engine.map_choice.tourney_map_order:
+        if len(layer) % 2 != 1:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tournament layer {layer} does not have an odd number of maps (rounds)",
+            )
+
+    app.maps = new_engine.map_choice
+
     return {"status": f"Game engine set to {app.engine.game_engine_name}"}
 
 
@@ -155,7 +168,7 @@ def run_single_match(match: Match):
     (notice that this endpoint will NOT notify the caller when the match is finished; it is
     the responsibility of the caller to keep on checking the database to see if the match has finished.)
     """
-    if app.engine is None:
+    if app.engine is None or app.maps is None:
         raise HTTPException(status_code=400, detail="Game engine not set yet")
 
     if match.game_engine_name != app.engine.game_engine_name:
@@ -173,6 +186,8 @@ def run_single_match(match: Match):
             status_code=400, detail="Number of users should match number of submissions"
         )
 
+    map_chosen = choose_map(app.maps, MatchType.UNRANKED)
+
     currMatch = MatchRunner(
         match,
         next(app.match_counter),
@@ -185,7 +200,8 @@ def run_single_match(match: Match):
         app.s3_resource,
         app.dynamodb_resource,
         "single_match_callback",
-        "unranked",
+        MatchType.UNRANKED,
+        game_map=map_chosen,
     )
     return currMatch.sendJob()
 
@@ -210,16 +226,16 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
     storageHandler = StorageHandler(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
-    storageHandler.upload_replay(dest_filename, file)
-    storageHandler.update_finished_match_in_table(
-        MatchTableSchema(
-            match_id,
-            outcome="team1"
-            if storageHandler.get_winner_from_replay(file) == 1
-            else "team2",
-            replay_filename=dest_filename,
+
+    try:
+        winner = storageHandler.process_replay(file, dest_filename)
+        storageHandler.update_finished_match_in_table(
+            MatchTableSchema(
+                match_id, outcome="team" + str(winner), replay_filename=dest_filename
+            )
         )
-    )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Bad replay from tango") from exc
 
 
 @app.post("/scrimmage")
@@ -238,11 +254,13 @@ def run_scrimmage(ranked_scrimmages: RankedScrimmages):
     It will upload scrimmage replays to replay storage as matches finish running. It will update
     elo once at the end of the scrimmage.
     """
-    if app.engine is None:
+    if app.engine is None or app.maps is None:
         raise HTTPException(status_code=400, detail="Game engine not set yet")
 
     if ranked_scrimmages.game_engine_name != app.engine.game_engine_name:
         raise HTTPException(status_code=400, detail="Incompatible game engine")
+
+    map_selection = app.maps
 
     scrimmage_id = time_ns()
     rankedGameRunner = RankedGameRunner(
@@ -257,6 +275,7 @@ def run_scrimmage(ranked_scrimmages: RankedScrimmages):
         ),
         app.tango,
         app.s3_resource,
+        game_map_chooser=lambda: choose_map(map_selection, MatchType.RANKED),
     )
     rankedGameRunner.run_ranked_scrimmage(ranked_scrimmages)
     return scrimmage_id
@@ -281,11 +300,12 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
     storageHandler = StorageHandler(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
-    storageHandler.upload_replay(dest_filename, file)
 
-    app.ongoing_batch_match_runners_table[scrimmage_id][
-        match_id
-    ] = storageHandler.get_winner_from_replay(file)
+    try:
+        winner = storageHandler.process_replay(file, dest_filename)
+        app.ongoing_batch_match_runners_table[scrimmage_id][match_id] = winner
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Malformed tango output") from exc
 
 
 @app.post("/tournament/")
@@ -310,7 +330,7 @@ def run_tournament(tournament: Tournament):
 
     Returns if the tournament is added to tournament queue, the tournament id.
     """
-    if app.engine is None:
+    if app.engine is None or app.maps is None:
         raise HTTPException(status_code=400, detail="Game engine not set yet")
 
     if tournament.game_engine_name != app.engine.game_engine_name:
@@ -329,6 +349,7 @@ def run_tournament(tournament: Tournament):
         ),
         app.tango,
         app.s3_resource,
+        app.maps.tourney_map_order,
     )
     rankedGameRunner.run_tournament(tournament)
     return tournament_id
@@ -353,8 +374,9 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
     storageHandler = StorageHandler(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
-    storageHandler.upload_replay(dest_filename, file)
 
-    app.ongoing_batch_match_runners_table[tournament_id][
-        match_id
-    ] = storageHandler.get_winner_from_replay(file)
+    try:
+        winner = storageHandler.process_replay(file, dest_filename)
+        app.ongoing_batch_match_runners_table[tournament_id][match_id] = winner
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Bad tango output") from exc

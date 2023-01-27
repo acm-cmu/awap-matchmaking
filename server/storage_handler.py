@@ -3,6 +3,8 @@ import json
 import tempfile
 from datetime import datetime
 
+from decode_replay import parse_tango_output
+
 # fields can sometime be left empty / unused, depending on what fields need to be accessed/updated in database
 class MatchTableSchema:
     match_id: int
@@ -13,6 +15,7 @@ class MatchTableSchema:
     outcome: str  # [team_1, team_2]
     elo_change: int  # winner receives + elo_change, loser receives - elo_change
     replay_filename: str
+    map_name: str
 
     def __init__(
         self,
@@ -24,6 +27,7 @@ class MatchTableSchema:
         outcome="",
         replay_filename="",
         elo_change=0,
+        map_name="",
     ):
         self.match_id = match_id
         self.team_1 = team_1
@@ -33,6 +37,7 @@ class MatchTableSchema:
         self.outcome = outcome
         self.replay_filename = replay_filename
         self.elo_change = elo_change
+        self.map_name = map_name
 
 
 # class for all logic regarding uploading/downloading files from s3, as well as working with and parsing files
@@ -41,6 +46,7 @@ class StorageHandler:
         self.s3 = s3_resource
         self.dynamodb_resource = dynamodb_resource
 
+    # DEPRECATED
     def upload_replay(self, dest_filename: str, replay_file: bytes):
         # write to a temporary local file, then upload to s3
         with tempfile.TemporaryDirectory() as tempdir:
@@ -66,11 +72,25 @@ class StorageHandler:
                 local_path, os.environ["AWS_REPLAY_BUCKET_NAME"], dest_filename
             )
 
-    # TODO: properly implement
-    # should also correctly parse results for bots that throw errors, etc.
+    # DEPRECATED
     def get_winner_from_replay(self, replay_file: bytes):
         result = json.loads(replay_file.decode("utf-8").split("\n")[-2])
         return result["scores"]["Outcome"]
+
+    def process_replay(self, tango_output: bytes, dest_filename: str) -> int:
+        """
+        Parses the replay file, uploads it and returns the winner
+        """
+        replay_line = parse_tango_output(tango_output)
+
+        with tempfile.NamedTemporaryFile(mode="w") as replay_file:
+            replay_file.write(replay_line)
+            self.s3.upload_file(
+                replay_file.name, os.environ["AWS_REPLAY_BUCKET_NAME"], dest_filename
+            )
+
+        replay = json.loads(replay_line)
+        return 1 if replay["winner"] == "red" else 2
 
     def adjust_elo_table(self, new_elos: dict[str, int]):
         curr_player_table = self.dynamodb_resource.Table(
@@ -105,6 +125,7 @@ class StorageHandler:
                     "REPLAY_FILENAME": "",
                     "ELO_CHANGE": 0,
                     "LAST_UPDATED": datetime.today().isoformat(),
+                    "MAP_NAME": match_info.map_name,
                 }
             )
         except Exception as e:

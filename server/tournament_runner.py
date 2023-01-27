@@ -1,8 +1,14 @@
 import os
-import math
 from threading import Thread
+from typing import Optional
 from pydantic import BaseModel
-from server.match_runner import UserSubmission, MatchRunner, Match, MatchPlayer
+from server.match_runner import (
+    MatchType,
+    UserSubmission,
+    MatchRunner,
+    Match,
+    MatchPlayer,
+)
 from server.storage_handler import StorageHandler, MatchTableSchema
 from util import AtomicCounter
 
@@ -14,6 +20,8 @@ class Tournament(BaseModel):
 
 
 class TournamentRunner:
+    match_map_order: list[list[str]]
+
     def __init__(
         self,
         dynamodb_resource,
@@ -23,6 +31,7 @@ class TournamentRunner:
         match_runner_config,
         tango,
         s3_resource,
+        match_map_order: list[list[str]],
     ):
         self.tournament_id = tournament_id
         self.match_counter = match_counter
@@ -39,6 +48,8 @@ class TournamentRunner:
         self.dynamodb_resource = (
             dynamodb_resource  # also needed for player table / looking up elos
         )
+
+        self.match_map_order = match_map_order
 
     def run_tournament(self, tournament: Tournament):
         # get the ratings of the users specified in the list
@@ -60,7 +71,7 @@ class TournamentRunner:
         return (n != 0) and (n & (n - 1) == 0)
 
     def tournament_worker_thread(
-        self, tournament: Tournament, tournament_players: list[MatchPlayer]
+        self, tournament: Tournament, tournament_players: list[Optional[MatchPlayer]]
     ):
         tournament_players = tournament_players[: tournament.num_tournament_spots]
 
@@ -81,6 +92,10 @@ class TournamentRunner:
         storageHandler = StorageHandler(
             s3_resource=self.s3_resource, dynamodb_resource=self.dynamodb_resource
         )
+
+        layer = 0
+        num_specified_layer_maps = len(self.match_map_order)
+
         while len(curr_tournament_layer) > 1:
             next_tournament_layer = []
             curr_tournament_layer_results = []
@@ -105,12 +120,24 @@ class TournamentRunner:
                     next_tournament_layer.append(actual_player)
                     continue
 
-                # TODO: assume Bo5 for now
+                # Get number of matches from the number of maps supplied
+                layer_maps = self.match_map_order[
+                    layer % num_specified_layer_maps
+                ]  # we loop back if not enough layers are specified
+                print(layer_maps)
+                num_matches = len(layer_maps)
+                num_wins_req = num_matches // 2 + 1
+                print(
+                    f"playing up to {num_matches} matches, {num_wins_req} wins requried"
+                )
+
                 player1Wins = 0
                 player2Wins = 0
                 replayLocations = []
 
-                while player1Wins < 3 and player2Wins < 3:
+                map_num = 0
+
+                while player1Wins < num_wins_req and player2Wins < num_wins_req:
                     match = Match(
                         game_engine_name=tournament.game_engine_name,
                         num_players=2,  # TODO: tournament just assumes 1v1 for now
@@ -120,15 +147,18 @@ class TournamentRunner:
                         ],
                     )
 
+                    print("map_num", map_num)
+
                     currMatch = MatchRunner(
                         match,
-                        self.match_counter,
+                        next(self.match_counter),
                         self.match_runner_config,
                         self.tango,
                         self.s3_resource,
                         self.dynamodb_resource,
                         f"tournament_callback/{self.tournament_id}",
-                        "tournament",
+                        MatchType.TOURNAMENT,
+                        layer_maps[map_num],
                     )
                     currMatch.sendJob()
 
@@ -152,6 +182,8 @@ class TournamentRunner:
 
                     replayLocations.append(f"tournament-{currMatch.match_id}.json")
 
+                    map_num += 1
+
                     # update match table with finished match results
                     storageHandler.update_finished_match_in_table(
                         MatchTableSchema(
@@ -162,7 +194,7 @@ class TournamentRunner:
                     )
 
                 # add the winner to the next tournament layer
-                winner_id = 0 if player1Wins == 3 else 1
+                winner_id = 0 if player1Wins > player2Wins else 1
                 next_tournament_layer.append(curr_tournament_layer[i + winner_id])
 
                 curr_tournament_layer_results.append(
@@ -178,6 +210,7 @@ class TournamentRunner:
 
             complete_tournament_results.append(curr_tournament_layer_results)
             curr_tournament_layer = next_tournament_layer
+            layer += 1
 
         # tournament has been completed; upload final tournament bracket onto s3
         print("completed tournament with following bracket: ")

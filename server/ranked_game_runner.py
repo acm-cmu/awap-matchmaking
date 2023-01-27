@@ -2,8 +2,10 @@
 # you would likely need spin up a python worker thread to run the matches
 import os
 from threading import Thread
+from typing import Callable
 from pydantic import BaseModel
 from server.match_runner import (
+    MatchType,
     UserSubmission,
     MatchRunner,
     Match,
@@ -38,6 +40,7 @@ class Elo:
 class RankedGameRunner:
     # number of matches each team participates in; should be even number and less than total number of teams
     num_matches = 4
+    game_map_chooser: Callable[[], str]
 
     def __init__(
         self,
@@ -48,6 +51,7 @@ class RankedGameRunner:
         match_runner_config,
         tango,
         s3_resource,
+        game_map_chooser: Callable[[], str],
     ):
         self.scrimmage_id = scrimmage_id
         self.match_counter = match_counter
@@ -64,6 +68,7 @@ class RankedGameRunner:
         self.dynamodb_resource = (
             dynamodb_resource  # also needed for player table / looking up elos
         )
+        self.game_map_chooser = game_map_chooser
 
     def run_ranked_scrimmage(self, ranked_scrimmage: RankedScrimmages):
         if len(ranked_scrimmage.user_submissions) < RankedGameRunner.num_matches:
@@ -146,7 +151,8 @@ class RankedGameRunner:
                 self.s3_resource,
                 self.dynamodb_resource,
                 f"scrimmage_callback/{self.scrimmage_id}",
-                "ranked",
+                MatchType.RANKED,
+                game_map=self.game_map_chooser(),
             )
             currMatch.sendJob()
 
