@@ -2,6 +2,7 @@
 # you would likely need spin up a python worker thread to run the matches
 import os
 from threading import Thread
+from time import time
 from typing import Callable
 from pydantic import BaseModel
 from server.match_runner import (
@@ -161,14 +162,20 @@ class RankedGameRunner:
                 currMatch.match_id
                 not in self.ongoing_batch_match_runners[self.scrimmage_id]
             ):
-                pass
+                time.sleep(1.0)
 
             # adjust elo according to winner
             # TODO: assume winner is either 1 or 2 right now
-            winner_is_player_1 = (
-                self.ongoing_batch_match_runners[self.scrimmage_id][currMatch.match_id]
-                == 1
-            )
+            outcome = self.ongoing_batch_match_runners[self.scrimmage_id][
+                currMatch.match_id
+            ]
+
+            if outcome == -1:
+                continue
+
+            dest_filename = f"ranked_scrimmage-{currMatch.match_id}.json"
+
+            winner_is_player_1 = outcome == 1
             (player_1_change, player_2_change) = Elo.calc_elo_change(
                 player_1.rating, player_2.rating, winner_is_player_1
             )
@@ -180,8 +187,9 @@ class RankedGameRunner:
                 MatchTableSchema(
                     currMatch.match_id,
                     outcome="team1" if winner_is_player_1 else "team2",
-                    replay_filename=f"ranked_scrimmage-{currMatch.match_id}.json",
+                    replay_filename=dest_filename,
                     elo_change=abs(player_1_change),
+                    replay_url=storageHandler.get_replay_url(dest_filename),
                 )
             )
 
