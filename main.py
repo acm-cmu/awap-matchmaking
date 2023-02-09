@@ -1,6 +1,7 @@
 import json
 import os
 from socket import socket
+import sys
 from time import time_ns
 from typing import Optional, Union, overload
 from decode_replay import parse_tango_output
@@ -30,7 +31,7 @@ class API(FastAPI):
     environ: os._Environ[str]
     tango: TangoInterface
 
-    ongoing_batch_match_runners_table: dict[int, dict[int, str]]
+    ongoing_batch_match_runners_table: dict[int, dict[int, int]]
     match_counter: AtomicCounter
 
     def __init__(self):
@@ -229,12 +230,18 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
+        temp_url = storageHandler.get_replay_url(dest_filename)
         storageHandler.update_finished_match_in_table(
             MatchTableSchema(
-                match_id, outcome="team" + str(winner), replay_filename=dest_filename
+                match_id,
+                outcome="team" + str(winner),
+                replay_filename=dest_filename,
+                replay_url=temp_url,
             )
         )
     except Exception as exc:
+        storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
+        print(file, file=sys.stderr)
         raise HTTPException(status_code=400, detail="Bad replay from tango") from exc
 
 
@@ -305,6 +312,9 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
         winner = storageHandler.process_replay(file, dest_filename)
         app.ongoing_batch_match_runners_table[scrimmage_id][match_id] = winner
     except Exception as exc:
+        app.ongoing_batch_match_runners_table[scrimmage_id][match_id] = -1
+        storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
+        print(file, file=sys.stderr)
         raise HTTPException(status_code=400, detail="Malformed tango output") from exc
 
 
@@ -379,4 +389,6 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
         winner = storageHandler.process_replay(file, dest_filename)
         app.ongoing_batch_match_runners_table[tournament_id][match_id] = winner
     except Exception as exc:
+        storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
+        app.ongoing_batch_match_runners_table[tournament_id][match_id] = -1
         raise HTTPException(status_code=400, detail="Bad tango output") from exc

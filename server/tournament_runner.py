@@ -1,5 +1,6 @@
 import os
 from threading import Thread
+from time import time
 from typing import Optional
 from pydantic import BaseModel
 from server.match_runner import (
@@ -137,7 +138,11 @@ class TournamentRunner:
 
                 map_num = 0
 
-                while player1Wins < num_wins_req and player2Wins < num_wins_req:
+                while (
+                    map_num < num_matches
+                    and player1Wins < num_wins_req
+                    and player2Wins < num_wins_req
+                ):
                     match = Match(
                         game_engine_name=tournament.game_engine_name,
                         num_players=2,  # TODO: tournament just assumes 1v1 for now
@@ -169,7 +174,7 @@ class TournamentRunner:
                             self.tournament_id
                         ]
                     ):
-                        pass
+                        time.sleep(1.0)
 
                     # TODO: assume winner is either 1 or 2, so winner_id either 0 or 1
                     winner_id = self.ongoing_batch_match_runners_table[
@@ -177,10 +182,11 @@ class TournamentRunner:
                     ][currMatch.match_id]
                     if winner_id == 1:
                         player1Wins += 1
-                    else:
+                    elif winner_id == 2:
                         player2Wins += 1
 
-                    replayLocations.append(f"tournament-{currMatch.match_id}.json")
+                    replay_name = f"tournament-{currMatch.match_id}.json"
+                    replayLocations.append(replay_name)
 
                     map_num += 1
 
@@ -189,7 +195,8 @@ class TournamentRunner:
                         MatchTableSchema(
                             currMatch.match_id,
                             outcome="team1" if player1Wins else "team2",
-                            replay_filename=f"tournament-{currMatch.match_id}.json",
+                            replay_filename=replay_name,
+                            replay_url=storageHandler.get_replay_url(replay_name),
                         ),
                     )
 

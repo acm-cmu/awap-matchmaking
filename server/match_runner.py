@@ -120,7 +120,7 @@ class MatchRunner:
                 self.match_id,
                 team_1=self.match.user_submissions[0].username,
                 team_2=self.match.user_submissions[1].username,
-                type=self.match_type.name.lower(),
+                match_type=self.match_type.name.lower(),
                 map_name=self.game_map,
             )
         )
