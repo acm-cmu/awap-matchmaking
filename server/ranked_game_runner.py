@@ -170,6 +170,7 @@ class RankedGameRunner:
 
         players_map: dict[str, MatchPlayer] = {}
         net_elo_changes: dict[str, int] = {}
+        net_elo_changes_mutex = Lock()
 
         for scrimmage_player in scrimmage_players:
             players_map[scrimmage_player.user_info.username] = scrimmage_player
@@ -194,8 +195,10 @@ class RankedGameRunner:
             (player_1_change, player_2_change) = Elo.calc_elo_change(
                 player_1.rating, player_2.rating, winner_is_player_1
             )
+            net_elo_changes_mutex.acquire()
             net_elo_changes[player_1.user_info.username] += player_1_change
             net_elo_changes[player_2.user_info.username] += player_2_change
+            net_elo_changes_mutex.release()
             storageHandler.update_finished_match_in_table(
                 MatchTableSchema(
                     match_id,
