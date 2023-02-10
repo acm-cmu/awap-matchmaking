@@ -1,6 +1,5 @@
-import json
 import os
-from socket import socket
+import sys
 from time import time_ns
 from typing import Optional, Union, overload
 from decode_replay import parse_tango_output
@@ -14,8 +13,12 @@ from server.game_engine import GameEngine, MapSelection, choose_map, setup_game_
 from server.match_runner import Match, MatchRunner, MatchType, UserSubmission
 from server.storage_handler import StorageHandler, MatchTableSchema
 from server.tango import TangoInterface
-from server.ranked_game_runner import RankedGameRunner, RankedScrimmages
-from server.tournament_runner import TournamentRunner, Tournament
+from server.ranked_game_runner import (
+    OngoingRankedMatchTable,
+    RankedGameRunner,
+    RankedScrimmages,
+)
+from server.tournament_runner import OngoingTourneyTable, TournamentRunner, Tournament
 from util import AtomicCounter
 
 
@@ -30,7 +33,9 @@ class API(FastAPI):
     environ: os._Environ[str]
     tango: TangoInterface
 
-    ongoing_batch_match_runners_table: dict[int, dict[int, str]]
+    ongoing_batch_match_runners_table: dict[int, dict[int, int]]
+    scrimmage_table: dict[int, OngoingRankedMatchTable]
+    tourney_table: dict[int, OngoingTourneyTable]
     match_counter: AtomicCounter
 
     def __init__(self):
@@ -54,6 +59,8 @@ class API(FastAPI):
         )
 
         self.ongoing_batch_match_runners_table = {}
+        self.scrimmage_table = {}
+        self.tourney_table = {}
 
 
 app = API()
@@ -229,12 +236,18 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
+        temp_url = storageHandler.get_replay_url(dest_filename)
         storageHandler.update_finished_match_in_table(
             MatchTableSchema(
-                match_id, outcome="team" + str(winner), replay_filename=dest_filename
+                match_id,
+                outcome="team" + str(winner),
+                replay_filename=dest_filename,
+                replay_url=temp_url,
             )
         )
     except Exception as exc:
+        storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
+        print(file, file=sys.stderr)
         raise HTTPException(status_code=400, detail="Bad replay from tango") from exc
 
 
@@ -263,21 +276,28 @@ def run_scrimmage(ranked_scrimmages: RankedScrimmages):
     map_selection = app.maps
 
     scrimmage_id = time_ns()
-    rankedGameRunner = RankedGameRunner(
-        app.dynamodb_resource,
-        app.match_counter,
-        scrimmage_id,
-        app.ongoing_batch_match_runners_table,
-        dict(
-            makefile=app.makefile,
-            engine=app.engine_filename,
-            fastapi_host=app.fastapi_host,
-        ),
-        app.tango,
-        app.s3_resource,
-        game_map_chooser=lambda: choose_map(map_selection, MatchType.RANKED),
-    )
-    rankedGameRunner.run_ranked_scrimmage(ranked_scrimmages)
+
+    app.scrimmage_table[scrimmage_id] = OngoingRankedMatchTable()
+
+    try:
+        rankedGameRunner = RankedGameRunner(
+            app.dynamodb_resource,
+            app.match_counter,
+            scrimmage_id,
+            app.scrimmage_table[scrimmage_id],
+            dict(
+                makefile=app.makefile,
+                engine=app.engine_filename,
+                fastapi_host=app.fastapi_host,
+            ),
+            app.tango,
+            app.s3_resource,
+            game_map_chooser=lambda: choose_map(map_selection, MatchType.RANKED),
+        )
+        rankedGameRunner.run_ranked_scrimmage(ranked_scrimmages)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     return scrimmage_id
 
 
@@ -303,8 +323,11 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
-        app.ongoing_batch_match_runners_table[scrimmage_id][match_id] = winner
+        app.scrimmage_table[scrimmage_id](match_id, winner, dest_filename)
+
     except Exception as exc:
+        storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
+        print(file, file=sys.stderr)
         raise HTTPException(status_code=400, detail="Malformed tango output") from exc
 
 
@@ -337,11 +360,13 @@ def run_tournament(tournament: Tournament):
         raise HTTPException(status_code=400, detail="Incompatible game engine")
 
     tournament_id = time_ns()
+    app.tourney_table[tournament_id] = OngoingTourneyTable()
+
     rankedGameRunner = TournamentRunner(
         app.dynamodb_resource,
         app.match_counter,
         tournament_id,
-        app.ongoing_batch_match_runners_table,
+        app.tourney_table[tournament_id],
         dict(
             makefile=app.makefile,
             engine=app.engine_filename,
@@ -377,6 +402,9 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
-        app.ongoing_batch_match_runners_table[tournament_id][match_id] = winner
+        app.tourney_table[tournament_id](match_id, winner, dest_filename)
     except Exception as exc:
+        print(str(exc))
+        storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
+        app.tourney_table[tournament_id](match_id, -1, "")
         raise HTTPException(status_code=400, detail="Bad tango output") from exc

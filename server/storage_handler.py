@@ -10,11 +10,12 @@ class MatchTableSchema:
     match_id: int
     team_1: str
     team_2: str
-    type: str  # [unranked, ranked, tournament]
+    match_type: str  # [unranked, ranked, tournament]
     status: str  # [pending, finished]
     outcome: str  # [team_1, team_2]
     elo_change: int  # winner receives + elo_change, loser receives - elo_change
     replay_filename: str
+    replay_url: str
     map_name: str
 
     def __init__(
@@ -22,22 +23,24 @@ class MatchTableSchema:
         match_id,
         team_1="",
         team_2="",
-        type="",
+        match_type="",
         status="",
         outcome="",
         replay_filename="",
         elo_change=0,
         map_name="",
+        replay_url="",
     ):
         self.match_id = match_id
         self.team_1 = team_1
         self.team_2 = team_2
-        self.type = type
+        self.match_type = match_type
         self.status = status
         self.outcome = outcome
         self.replay_filename = replay_filename
         self.elo_change = elo_change
         self.map_name = map_name
+        self.replay_url = replay_url
 
 
 # class for all logic regarding uploading/downloading files from s3, as well as working with and parsing files
@@ -82,6 +85,14 @@ class StorageHandler:
         Parses the replay file, uploads it and returns the winner
         """
         replay_line = parse_tango_output(tango_output)
+        replay = json.loads(replay_line)
+
+        if replay["winner"] == "red":
+            winner = 1
+        elif replay["winner"] == "blue":
+            winner = 2
+        else:
+            raise Exception("unknown winner")
 
         with tempfile.NamedTemporaryFile(mode="w") as replay_file:
             replay_file.write(replay_line)
@@ -89,8 +100,20 @@ class StorageHandler:
                 replay_file.name, os.environ["AWS_REPLAY_BUCKET_NAME"], dest_filename
             )
 
-        replay = json.loads(replay_line)
-        return 1 if replay["winner"] == "red" else 2
+        return winner
+
+    def get_replay_url(self, dest_filename: str, expiry_seconds: int = 43200) -> str:
+        """
+        Gets a temporary URL which can be used to access the replay.
+        """
+        return self.s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": os.environ["AWS_REPLAY_BUCKET_NAME"],
+                "Key": dest_filename,
+            },
+            ExpiresIn=expiry_seconds,
+        )
 
     def adjust_elo_table(self, new_elos: dict[str, int]):
         curr_player_table = self.dynamodb_resource.Table(
@@ -119,10 +142,11 @@ class StorageHandler:
                     "MATCH_ID": match_info.match_id,
                     "TEAM_1": match_info.team_1,
                     "TEAM_2": match_info.team_2,
-                    "MATCH_TYPE": match_info.type,
+                    "MATCH_TYPE": match_info.match_type,
                     "MATCH_STATUS": "pending",
                     "OUTCOME": "",
                     "REPLAY_FILENAME": "",
+                    "REPLAY_URL": "",
                     "ELO_CHANGE": 0,
                     "LAST_UPDATED": datetime.today().isoformat(),
                     "MAP_NAME": match_info.map_name,
@@ -139,12 +163,30 @@ class StorageHandler:
         try:
             curr_match_table.update_item(
                 Key={"MATCH_ID": match_info.match_id},
-                UpdateExpression="set MATCH_STATUS=:s, OUTCOME=:o, REPLAY_FILENAME=:r, ELO_CHANGE=:e, LAST_UPDATED=:t",
+                UpdateExpression="set MATCH_STATUS=:s, OUTCOME=:o, REPLAY_FILENAME=:r, ELO_CHANGE=:e, LAST_UPDATED=:t, REPLAY_URL=:u",
                 ExpressionAttributeValues={
                     ":s": "finished",
                     ":o": match_info.outcome,
                     ":r": match_info.replay_filename,
                     ":e": match_info.elo_change,
+                    ":t": datetime.today().isoformat(),
+                    ":u": match_info.replay_url,
+                },
+            )
+        except Exception as e:
+            print("issue with updating pending match to finished in table")
+            print(e)
+
+    def update_failed_match_in_table(self, match_info: MatchTableSchema):
+        curr_match_table = self.dynamodb_resource.Table(
+            os.environ["AWS_MATCH_TABLE_NAME"]
+        )
+        try:
+            curr_match_table.update_item(
+                Key={"MATCH_ID": match_info.match_id},
+                UpdateExpression="set MATCH_STATUS=:s, LAST_UPDATED=:t",
+                ExpressionAttributeValues={
+                    ":s": "failed",
                     ":t": datetime.today().isoformat(),
                 },
             )

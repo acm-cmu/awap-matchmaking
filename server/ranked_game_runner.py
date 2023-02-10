@@ -1,7 +1,5 @@
-# used to run ranked scrimamge matches
-# you would likely need spin up a python worker thread to run the matches
 import os
-from threading import Thread
+from threading import Lock, Semaphore, Thread
 from typing import Callable
 from pydantic import BaseModel
 from server.match_runner import (
@@ -37,6 +35,68 @@ class Elo:
         return (rating_change, -1 * rating_change)
 
 
+class PostRankedMatchCallback:
+    net_elo_changes: dict[str, int]
+    net_elo_changes_mutex: Lock
+    player_1: MatchPlayer
+    player_2: MatchPlayer
+    match_id: int
+    storageHandler: StorageHandler
+
+    def __init__(
+        self,
+        net_elo_changes: dict[str, int],
+        net_elo_changes_mutex: Lock,
+        player_1: MatchPlayer,
+        player_2: MatchPlayer,
+        match_id: int,
+        storageHandler: StorageHandler,
+    ) -> None:
+        self.net_elo_changes = net_elo_changes
+        self.net_elo_changes_mutex = net_elo_changes_mutex
+        self.player_1 = player_1
+        self.player_2 = player_2
+        self.match_id = match_id
+        self.storageHandler = storageHandler
+
+    def __call__(self, winner: int, replay_filename: str) -> None:
+        winner_is_player_1 = winner == 1
+        (player_1_change, player_2_change) = Elo.calc_elo_change(
+            self.player_1.rating, self.player_2.rating, winner_is_player_1
+        )
+        with self.net_elo_changes_mutex:
+            self.net_elo_changes[self.player_1.user_info.username] += player_1_change
+            self.net_elo_changes[self.player_2.user_info.username] += player_2_change
+        self.storageHandler.update_finished_match_in_table(
+            MatchTableSchema(
+                self.match_id,
+                outcome="team1" if winner_is_player_1 else "team2",
+                replay_filename=replay_filename,
+                elo_change=abs(player_1_change),
+                replay_url=self.storageHandler.get_replay_url(replay_filename),
+            )
+        )
+
+
+class OngoingRankedMatchTable:
+    semaphore: Semaphore
+    post_match_callbacks: dict[int, Callable[[int, str], None]]
+
+    def __init__(self) -> None:
+        self.restart()
+
+    def register(self, match_id: int, callback: PostRankedMatchCallback) -> None:
+        self.post_match_callbacks[match_id] = callback
+
+    def restart(self):
+        self.semaphore = Semaphore(0)
+        self.post_match_callbacks = {}
+
+    def __call__(self, match_id: int, winner: int, replay_name: str) -> None:
+        self.semaphore.release()
+        self.post_match_callbacks[match_id](winner, replay_name)
+
+
 class RankedGameRunner:
     # number of matches each team participates in; should be even number and less than total number of teams
     num_matches = 4
@@ -47,7 +107,7 @@ class RankedGameRunner:
         dynamodb_resource,
         match_counter: AtomicCounter,
         scrimmage_id,
-        ongoing_batch_match_runners,
+        scrimmage_entry: OngoingRankedMatchTable,
         match_runner_config,
         tango,
         s3_resource,
@@ -56,10 +116,8 @@ class RankedGameRunner:
         self.scrimmage_id = scrimmage_id
         self.match_counter = match_counter
 
-        # global table mapping: scrimmage -> match_id -> winner
-        # the match callback will update this map, and the scrimmage will wait until the matchid appears in the dict
-        self.ongoing_batch_match_runners = ongoing_batch_match_runners
-        ongoing_batch_match_runners[scrimmage_id] = {}
+        # used to set the callbacks post-match
+        self.scrimmage_entry = scrimmage_entry
 
         # used for the matchrunner
         self.match_runner_config = match_runner_config
@@ -94,7 +152,7 @@ class RankedGameRunner:
         self, ranked_scrimmage: RankedScrimmages, scrimmage_players: list[MatchPlayer]
     ):
         # determine which matches to run
-        matches = set({})
+        matches: set[tuple[str, str]] = set({})
         index_lower_bound = 0
         index_upper_bound = len(scrimmage_players) - 1 - RankedGameRunner.num_matches
         for i, curr_player in enumerate(scrimmage_players):
@@ -120,8 +178,10 @@ class RankedGameRunner:
                             )
                         )
 
-        players_map = {}
-        net_elo_changes = {}
+        players_map: dict[str, MatchPlayer] = {}
+        net_elo_changes: dict[str, int] = {}
+        net_elo_changes_mutex = Lock()
+
         for scrimmage_player in scrimmage_players:
             players_map[scrimmage_player.user_info.username] = scrimmage_player
             net_elo_changes[scrimmage_player.user_info.username] = 0
@@ -133,6 +193,7 @@ class RankedGameRunner:
         storageHandler = StorageHandler(
             s3_resource=self.s3_resource, dynamodb_resource=self.dynamodb_resource
         )
+
         for (player_1_name, player_2_name) in matches:
             player_1 = players_map[player_1_name]
             player_2 = players_map[player_2_name]
@@ -154,45 +215,26 @@ class RankedGameRunner:
                 MatchType.RANKED,
                 game_map=self.game_map_chooser(),
             )
+
+            # this will be called by run_scrimmage_callback when it is done
+            post_match_callback = PostRankedMatchCallback(
+                net_elo_changes,
+                net_elo_changes_mutex,
+                player_1,
+                player_2,
+                currMatch.match_id,
+                storageHandler,
+            )
+            self.scrimmage_entry.register(currMatch.match_id, post_match_callback)
             currMatch.sendJob()
 
-            # wait for the match to finish
-            while (
-                currMatch.match_id
-                not in self.ongoing_batch_match_runners[self.scrimmage_id]
-            ):
-                pass
-
-            # adjust elo according to winner
-            # TODO: assume winner is either 1 or 2 right now
-            winner_is_player_1 = (
-                self.ongoing_batch_match_runners[self.scrimmage_id][currMatch.match_id]
-                == 1
-            )
-            (player_1_change, player_2_change) = Elo.calc_elo_change(
-                player_1.rating, player_2.rating, winner_is_player_1
-            )
-            net_elo_changes[player_1_name] += player_1_change
-            net_elo_changes[player_2_name] += player_2_change
-
-            # update the table with final match results
-            storageHandler.update_finished_match_in_table(
-                MatchTableSchema(
-                    currMatch.match_id,
-                    outcome="team1" if winner_is_player_1 else "team2",
-                    replay_filename=f"ranked_scrimmage-{currMatch.match_id}.json",
-                    elo_change=abs(player_1_change),
-                )
-            )
+        for _ in matches:
+            self.scrimmage_entry.semaphore.acquire()
 
         # apply all the changes in net_elo_changes
         updated_elos = {}
         for key, value in net_elo_changes.items():
             updated_elos[key] = players_map[key].rating + value
-        storageHandler = StorageHandler(dynamodb_resource=self.dynamodb_resource)
-        storageHandler.adjust_elo_table(updated_elos)
-
-        # tournament has been completed; upload final tournament bracket onto s3
         print("completed scrimmage with following final elos: ")
         print(updated_elos)
-        self.ongoing_batch_match_runners.pop(self.scrimmage_id)
+        storageHandler.adjust_elo_table(updated_elos)
