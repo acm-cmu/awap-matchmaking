@@ -1,7 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor
 import os
-from threading import Thread
+from threading import Lock, Semaphore, Thread
 from time import time
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel
 from server.match_runner import (
     MatchType,
@@ -10,7 +11,9 @@ from server.match_runner import (
     Match,
     MatchPlayer,
 )
+from server.ranked_game_runner import OngoingRankedMatchTable
 from server.storage_handler import StorageHandler, MatchTableSchema
+from server.tango import TangoInterface
 from util import AtomicCounter
 
 
@@ -20,15 +23,179 @@ class Tournament(BaseModel):
     num_tournament_spots: int
 
 
+class TourneyPairUpRunner:
+    tourney_id: int
+    engine_name: str
+    semaphore: Semaphore
+    maps: list[str]
+    p1: Optional[MatchPlayer]
+    p2: Optional[MatchPlayer]
+    storageHandler: StorageHandler
+    match_counter: AtomicCounter
+    tango: TangoInterface
+    parent: "OngoingTourneyTable"
+    parent_lock: Lock
+
+    next_match_id: int
+    p1wins: int
+    p2wins: int
+    replayLocs: list[str]
+
+    def __init__(
+        self,
+        tourney_id: int,
+        engine_name: str,
+        parent: "OngoingTourneyTable",
+        maps: list[str],
+        p1: Optional[MatchPlayer],
+        p2: Optional[MatchPlayer],
+        storageHandler: StorageHandler,
+        match_counter: AtomicCounter,
+        match_runner_config,
+        tango: TangoInterface,
+        s3_resource,
+        dynamodb_resource,
+    ) -> None:
+        self.tourney_id = tourney_id
+        self.engine_name = engine_name
+        self.p1 = p1
+        self.p2 = p2
+        self.maps = maps
+        self.match_counter = match_counter
+        self.match_runner_config = match_runner_config
+        self.tango = tango
+        self.s3_resource = s3_resource
+        self.dynamodb_resource = dynamodb_resource
+        self.parent = parent
+        self.storageHandler = storageHandler
+
+        self.next_match_id = -1
+        self.p1wins = 0
+        self.p2wins = 0
+        self.replayLocs = []
+
+    def __call__(self, winner: int, replay: str) -> None:
+        if winner == 1:
+            self.p1wins += 1
+        elif winner == 2:
+            self.p2wins += 1
+        else:
+            self.semaphore.release()
+            return
+
+        replay_url = self.storageHandler.get_replay_url(replay)
+
+        self.storageHandler.update_finished_match_in_table(
+            MatchTableSchema(
+                self.next_match_id,
+                outcome=f"team{winner}",
+                replay_filename=replay,
+                replay_url=replay_url,
+            ),
+        )
+
+        self.replayLocs.append(replay)
+        self.semaphore.release()
+
+    def start(self) -> tuple[dict[str, Any], MatchPlayer]:
+        if self.p1 is None or self.p2 is None:
+            actual_player = self.p1
+            if actual_player is None:
+                actual_player = self.p2
+            assert actual_player is not None
+            return {
+                "player1": actual_player.user_info.username,
+                "player2": "bye",
+                "winner": actual_player.user_info.username,
+                "replay_filename": [],
+            }, actual_player
+
+        num_matches = len(self.maps)
+        num_wins_req = num_matches // 2 + 1
+
+        self.p1wins = 0
+        self.p2wins = 0
+        self.semaphore = Semaphore(0)
+        self.replayLocs = []
+        map_idx = 0
+
+        while (
+            map_idx < num_matches
+            and self.p1wins < num_wins_req
+            and self.p2wins < num_wins_req
+        ):
+            match = self.create_match(self.p1, self.p2, self.maps[map_idx])
+            map_idx += 1
+            self.parent.register(match.match_id, self)
+            match.sendJob()
+            self.semaphore.acquire()
+
+        winner = self.p1 if self.p1wins > self.p2wins else self.p2
+        return {
+            "player1": self.p1.user_info.username,
+            "player2": self.p2.user_info.username,
+            "winner": winner.user_info.username,
+            "replay_filename": self.replayLocs,
+        }, winner
+
+    def create_match(
+        self, p1: MatchPlayer, p2: MatchPlayer, match_map: str
+    ) -> MatchRunner:
+        match = Match(
+            game_engine_name=self.engine_name,
+            num_players=2,  # assumes 1v1 now
+            user_submissions=[p1.user_info, p2.user_info],
+        )
+
+        currMatch = MatchRunner(
+            match,
+            next(self.match_counter),
+            self.match_runner_config,
+            self.tango,
+            self.s3_resource,
+            self.dynamodb_resource,
+            f"tournament_callback/{self.tourney_id}",
+            MatchType.TOURNAMENT,
+            match_map,
+        )
+        self.next_match_id = currMatch.match_id
+        print(
+            f"Match {currMatch.match_id}: {p1.user_info.username} vs {p2.user_info.username}"
+        )
+        return currMatch
+
+
+class OngoingTourneyTable:
+    callbacks: dict[int, TourneyPairUpRunner]
+    lock: Lock
+
+    def __init__(self) -> None:
+        self.callbacks = {}
+        self.lock = Lock()
+
+    def register(self, match_id: int, pair: TourneyPairUpRunner):
+        with self.lock:
+            self.callbacks[match_id] = pair
+
+    def __call__(self, match_id: int, winner: int, replay: str) -> None:
+        with self.lock:
+            self.callbacks[match_id](winner, replay)
+
+    def clear(self):
+        with self.lock:
+            self.callbacks.clear()
+
+
 class TournamentRunner:
     match_map_order: list[list[str]]
+    tourney_table_entry: OngoingTourneyTable
 
     def __init__(
         self,
         dynamodb_resource,
         match_counter: AtomicCounter,
         tournament_id,
-        ongoing_batch_match_runners,
+        tourney_table_entry: OngoingTourneyTable,
         match_runner_config,
         tango,
         s3_resource,
@@ -37,10 +204,8 @@ class TournamentRunner:
         self.tournament_id = tournament_id
         self.match_counter = match_counter
 
-        # global table mapping: tournament_id -> match_id -> winner
-        # the match callback will update this map, and the tournament will wait until the matchid appears in the dict
-        self.ongoing_batch_match_runners_table = ongoing_batch_match_runners
-        self.ongoing_batch_match_runners_table[tournament_id] = {}
+        # used to set the callbacks post-match
+        self.tourney_table_entry = tourney_table_entry
 
         # used for the matchrunner
         self.match_runner_config = match_runner_config
@@ -81,7 +246,7 @@ class TournamentRunner:
             tournament_players.append(None)
 
         # set up tournament bracket; keep on playing adjacent teams, only keeping the winner
-        curr_tournament_layer = []
+        curr_tournament_layer: list[Optional[MatchPlayer]] = []
 
         for i in range(len(tournament_players) // 2):
             curr_tournament_layer.append(tournament_players[i])
@@ -98,125 +263,30 @@ class TournamentRunner:
         num_specified_layer_maps = len(self.match_map_order)
 
         while len(curr_tournament_layer) > 1:
-            next_tournament_layer = []
-            curr_tournament_layer_results = []
-            for i in range(0, len(curr_tournament_layer), 2):
-                # play match: curr_tournament_layer[i] vs. curr_tournament_layer[i+1]
-                if (
-                    curr_tournament_layer[i] is None
-                    or curr_tournament_layer[i + 1] is None
-                ):
-                    actual_player = curr_tournament_layer[i]
-                    if actual_player is None:
-                        actual_player = curr_tournament_layer[i + 1]
-
-                    curr_tournament_layer_results.append(
-                        {
-                            "player1": actual_player.user_info.username,
-                            "player2": "bye",
-                            "winner": actual_player.user_info.username,
-                            "replay_filename": "",
-                        }
-                    )
-                    next_tournament_layer.append(actual_player)
-                    continue
-
-                # Get number of matches from the number of maps supplied
-                layer_maps = self.match_map_order[
-                    layer % num_specified_layer_maps
-                ]  # we loop back if not enough layers are specified
-                print(layer_maps)
-                num_matches = len(layer_maps)
-                num_wins_req = num_matches // 2 + 1
-                print(
-                    f"playing up to {num_matches} matches, {num_wins_req} wins requried"
+            pairups = [
+                TourneyPairUpRunner(
+                    self.tournament_id,
+                    tournament.game_engine_name,
+                    self.tourney_table_entry,
+                    self.match_map_order[layer % num_specified_layer_maps],
+                    curr_tournament_layer[i],
+                    curr_tournament_layer[i + 1],
+                    storageHandler,
+                    self.match_counter,
+                    self.match_runner_config,
+                    self.tango,
+                    self.s3_resource,
+                    self.dynamodb_resource,
                 )
+                for i in range(0, len(curr_tournament_layer), 2)
+            ]
 
-                player1Wins = 0
-                player2Wins = 0
-                replayLocations = []
+            results = list(
+                ThreadPoolExecutor(16).map(TourneyPairUpRunner.start, pairups)
+            )
 
-                map_num = 0
-
-                while (
-                    map_num < num_matches
-                    and player1Wins < num_wins_req
-                    and player2Wins < num_wins_req
-                ):
-                    match = Match(
-                        game_engine_name=tournament.game_engine_name,
-                        num_players=2,  # TODO: tournament just assumes 1v1 for now
-                        user_submissions=[
-                            curr_tournament_layer[i].user_info,
-                            curr_tournament_layer[i + 1].user_info,
-                        ],
-                    )
-
-                    print("map_num", map_num)
-
-                    currMatch = MatchRunner(
-                        match,
-                        next(self.match_counter),
-                        self.match_runner_config,
-                        self.tango,
-                        self.s3_resource,
-                        self.dynamodb_resource,
-                        f"tournament_callback/{self.tournament_id}",
-                        MatchType.TOURNAMENT,
-                        layer_maps[map_num],
-                    )
-                    currMatch.sendJob()
-
-                    # wait for the match to finish
-                    while (
-                        currMatch.match_id
-                        not in self.ongoing_batch_match_runners_table[
-                            self.tournament_id
-                        ]
-                    ):
-                        time.sleep(1.0)
-
-                    # TODO: assume winner is either 1 or 2, so winner_id either 0 or 1
-                    winner_id = self.ongoing_batch_match_runners_table[
-                        self.tournament_id
-                    ][currMatch.match_id]
-                    if winner_id == 1:
-                        player1Wins += 1
-                    elif winner_id == 2:
-                        player2Wins += 1
-
-                    replay_name = f"tournament-{currMatch.match_id}.json"
-                    replayLocations.append(replay_name)
-
-                    map_num += 1
-
-                    # update match table with finished match results
-                    storageHandler.update_finished_match_in_table(
-                        MatchTableSchema(
-                            currMatch.match_id,
-                            outcome="team1" if player1Wins else "team2",
-                            replay_filename=replay_name,
-                            replay_url=storageHandler.get_replay_url(replay_name),
-                        ),
-                    )
-
-                # add the winner to the next tournament layer
-                winner_id = 0 if player1Wins > player2Wins else 1
-                next_tournament_layer.append(curr_tournament_layer[i + winner_id])
-
-                curr_tournament_layer_results.append(
-                    {
-                        "player1": curr_tournament_layer[i].user_info.username,
-                        "player2": curr_tournament_layer[i + 1].user_info.username,
-                        "winner": curr_tournament_layer[
-                            i + winner_id
-                        ].user_info.username,
-                        "replay_filenames": replayLocations,
-                    }
-                )
-
-            complete_tournament_results.append(curr_tournament_layer_results)
-            curr_tournament_layer = next_tournament_layer
+            curr_tournament_layer = [winner for (_, winner) in results]
+            complete_tournament_results.append([r for (r, _) in results])
             layer += 1
 
         # tournament has been completed; upload final tournament bracket onto s3
@@ -226,4 +296,5 @@ class TournamentRunner:
         storageHandler.upload_tournament_bracket(
             self.tournament_id, complete_tournament_results
         )
-        self.ongoing_batch_match_runners_table.pop(self.tournament_id)
+
+        self.tourney_table_entry.callbacks.clear()

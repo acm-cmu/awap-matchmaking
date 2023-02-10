@@ -1,11 +1,6 @@
-# used to run ranked scrimamge matches
-# you would likely need spin up a python worker thread to run the matches
-import functools
 import os
 from threading import Lock, Semaphore, Thread
-import threading
-from time import time
-from typing import Callable, Optional
+from typing import Callable
 from pydantic import BaseModel
 from server.match_runner import (
     MatchType,
@@ -40,52 +35,66 @@ class Elo:
         return (rating_change, -1 * rating_change)
 
 
-class RankedScrimmagePostMatchCallbacks:
-    matches_left: int  # must acquire lock!
-    matches_left_mutex: Lock
-
-    post_match_callbacks: dict[int, Callable[[int, str], None]]
-    post_scrimmage_callback: Callable[[], None]
+class PostRankedMatchCallback:
+    net_elo_changes: dict[str, int]
+    net_elo_changes_mutex: Lock
+    player_1: MatchPlayer
+    player_2: MatchPlayer
+    match_id: int
+    storageHandler: StorageHandler
 
     def __init__(
-        self, num_matches: int, post_scrimmage_callback: Callable[[], None]
+        self,
+        net_elo_changes: dict[str, int],
+        net_elo_changes_mutex: Lock,
+        player_1: MatchPlayer,
+        player_2: MatchPlayer,
+        match_id: int,
+        storageHandler: StorageHandler,
     ) -> None:
-        self.matches_left = num_matches
-        self.matches_left_mutex = Lock()
-        self.post_match_callbacks = {}
-        self.post_scrimmage_callback = post_scrimmage_callback
+        self.net_elo_changes = net_elo_changes
+        self.net_elo_changes_mutex = net_elo_changes_mutex
+        self.player_1 = player_1
+        self.player_2 = player_2
+        self.match_id = match_id
+        self.storageHandler = storageHandler
 
-
-class RankedScrimmageTableEntry:
-    callbacks: Optional[RankedScrimmagePostMatchCallbacks]
-
-    def __init__(self):
-        self.callbacks = None
-
-    def setup(self, num_matches: int, post_scrimmage_callback: Callable[[], None]):
-        self.callbacks = RankedScrimmagePostMatchCallbacks(
-            num_matches, post_scrimmage_callback
+    def __call__(self, winner: int, replay_filename: str) -> None:
+        winner_is_player_1 = winner == 1
+        (player_1_change, player_2_change) = Elo.calc_elo_change(
+            self.player_1.rating, self.player_2.rating, winner_is_player_1
+        )
+        with self.net_elo_changes_mutex:
+            self.net_elo_changes[self.player_1.user_info.username] += player_1_change
+            self.net_elo_changes[self.player_2.user_info.username] += player_2_change
+        self.storageHandler.update_finished_match_in_table(
+            MatchTableSchema(
+                self.match_id,
+                outcome="team1" if winner_is_player_1 else "team2",
+                replay_filename=replay_filename,
+                elo_change=abs(player_1_change),
+                replay_url=self.storageHandler.get_replay_url(replay_filename),
+            )
         )
 
-    def register(self, match_id: int, callback: Callable[[int, str], None]):
-        if self.callbacks is None:
-            raise Exception()
-        self.callbacks.post_match_callbacks[match_id] = callback
 
-    def run_callback(self, match_id: int, outcome: int, replay_file: str):
-        if self.callbacks is None:
-            raise Exception()
+class OngoingRankedMatchTable:
+    semaphore: Semaphore
+    post_match_callbacks: dict[int, Callable[[int, str], None]]
 
-        matches_left = 0
+    def __init__(self) -> None:
+        self.restart()
 
-        self.callbacks.post_match_callbacks[match_id](outcome, replay_file)
-        self.callbacks.matches_left_mutex.acquire()
-        self.callbacks.matches_left -= 1
-        matches_left = self.callbacks.matches_left
-        self.callbacks.matches_left_mutex.release()
+    def register(self, match_id: int, callback: PostRankedMatchCallback) -> None:
+        self.post_match_callbacks[match_id] = callback
 
-        if matches_left == 0:
-            self.callbacks.post_scrimmage_callback()
+    def restart(self):
+        self.semaphore = Semaphore(0)
+        self.post_match_callbacks = {}
+
+    def __call__(self, match_id: int, winner: int, replay_name: str) -> None:
+        self.semaphore.release()
+        self.post_match_callbacks[match_id](winner, replay_name)
 
 
 class RankedGameRunner:
@@ -98,7 +107,7 @@ class RankedGameRunner:
         dynamodb_resource,
         match_counter: AtomicCounter,
         scrimmage_id,
-        scrimmage_entry: RankedScrimmageTableEntry,
+        scrimmage_entry: OngoingRankedMatchTable,
         match_runner_config,
         tango,
         s3_resource,
@@ -107,6 +116,7 @@ class RankedGameRunner:
         self.scrimmage_id = scrimmage_id
         self.match_counter = match_counter
 
+        # used to set the callbacks post-match
         self.scrimmage_entry = scrimmage_entry
 
         # used for the matchrunner
@@ -184,44 +194,6 @@ class RankedGameRunner:
             s3_resource=self.s3_resource, dynamodb_resource=self.dynamodb_resource
         )
 
-        def post_tango_callback(
-            player_1: MatchPlayer,
-            player_2: MatchPlayer,
-            match_id: int,
-            winner: int,
-            replay_filename: str,
-        ):
-            winner_is_player_1 = winner == 1
-            (player_1_change, player_2_change) = Elo.calc_elo_change(
-                player_1.rating, player_2.rating, winner_is_player_1
-            )
-            net_elo_changes_mutex.acquire()
-            net_elo_changes[player_1.user_info.username] += player_1_change
-            net_elo_changes[player_2.user_info.username] += player_2_change
-            net_elo_changes_mutex.release()
-            storageHandler.update_finished_match_in_table(
-                MatchTableSchema(
-                    match_id,
-                    outcome="team1" if winner_is_player_1 else "team2",
-                    replay_filename=replay_filename,
-                    elo_change=abs(player_1_change),
-                    replay_url=storageHandler.get_replay_url(replay_filename),
-                )
-            )
-
-        def post_scrimmage_callback():
-            # apply all the changes in net_elo_changes
-            updated_elos = {}
-            for key, value in net_elo_changes.items():
-                updated_elos[key] = players_map[key].rating + value
-            print("completed scrimmage with following final elos: ")
-            print(updated_elos)
-            storageHandler = StorageHandler(dynamodb_resource=self.dynamodb_resource)
-            storageHandler.adjust_elo_table(updated_elos)
-            del self.scrimmage_entry
-
-        self.scrimmage_entry.setup(len(matches), post_scrimmage_callback)
-
         for (player_1_name, player_2_name) in matches:
             player_1 = players_map[player_1_name]
             player_2 = players_map[player_2_name]
@@ -244,9 +216,25 @@ class RankedGameRunner:
                 game_map=self.game_map_chooser(),
             )
 
-            # this function will be called by run_scrimmage_callback when it is done
-            post_match_callback = functools.partial(
-                post_tango_callback, player_1, player_2, currMatch.match_id
+            # this will be called by run_scrimmage_callback when it is done
+            post_match_callback = PostRankedMatchCallback(
+                net_elo_changes,
+                net_elo_changes_mutex,
+                player_1,
+                player_2,
+                currMatch.match_id,
+                storageHandler,
             )
             self.scrimmage_entry.register(currMatch.match_id, post_match_callback)
             currMatch.sendJob()
+
+        for _ in matches:
+            self.scrimmage_entry.semaphore.acquire()
+
+        # apply all the changes in net_elo_changes
+        updated_elos = {}
+        for key, value in net_elo_changes.items():
+            updated_elos[key] = players_map[key].rating + value
+        print("completed scrimmage with following final elos: ")
+        print(updated_elos)
+        storageHandler.adjust_elo_table(updated_elos)
