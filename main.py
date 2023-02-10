@@ -15,7 +15,11 @@ from server.game_engine import GameEngine, MapSelection, choose_map, setup_game_
 from server.match_runner import Match, MatchRunner, MatchType, UserSubmission
 from server.storage_handler import StorageHandler, MatchTableSchema
 from server.tango import TangoInterface
-from server.ranked_game_runner import RankedGameRunner, RankedScrimmages
+from server.ranked_game_runner import (
+    RankedGameRunner,
+    RankedScrimmageTableEntry,
+    RankedScrimmages,
+)
 from server.tournament_runner import TournamentRunner, Tournament
 from util import AtomicCounter
 
@@ -32,6 +36,7 @@ class API(FastAPI):
     tango: TangoInterface
 
     ongoing_batch_match_runners_table: dict[int, dict[int, int]]
+    scrimmage_table: dict[int, RankedScrimmageTableEntry]
     match_counter: AtomicCounter
 
     def __init__(self):
@@ -55,6 +60,7 @@ class API(FastAPI):
         )
 
         self.ongoing_batch_match_runners_table = {}
+        self.scrimmage_table = {}
 
 
 app = API()
@@ -270,21 +276,28 @@ def run_scrimmage(ranked_scrimmages: RankedScrimmages):
     map_selection = app.maps
 
     scrimmage_id = time_ns()
-    rankedGameRunner = RankedGameRunner(
-        app.dynamodb_resource,
-        app.match_counter,
-        scrimmage_id,
-        app.ongoing_batch_match_runners_table,
-        dict(
-            makefile=app.makefile,
-            engine=app.engine_filename,
-            fastapi_host=app.fastapi_host,
-        ),
-        app.tango,
-        app.s3_resource,
-        game_map_chooser=lambda: choose_map(map_selection, MatchType.RANKED),
-    )
-    rankedGameRunner.run_ranked_scrimmage(ranked_scrimmages)
+
+    app.scrimmage_table[scrimmage_id] = RankedScrimmageTableEntry()
+
+    try:
+        rankedGameRunner = RankedGameRunner(
+            app.dynamodb_resource,
+            app.match_counter,
+            scrimmage_id,
+            app.scrimmage_table[scrimmage_id],
+            dict(
+                makefile=app.makefile,
+                engine=app.engine_filename,
+                fastapi_host=app.fastapi_host,
+            ),
+            app.tango,
+            app.s3_resource,
+            game_map_chooser=lambda: choose_map(map_selection, MatchType.RANKED),
+        )
+        rankedGameRunner.run_ranked_scrimmage(ranked_scrimmages)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     return scrimmage_id
 
 
@@ -310,7 +323,8 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
-        app.ongoing_batch_match_runners_table[scrimmage_id][match_id] = winner
+        app.scrimmage_table[scrimmage_id].run_callback(match_id, winner, dest_filename)
+
     except Exception as exc:
         app.ongoing_batch_match_runners_table[scrimmage_id][match_id] = -1
         storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
