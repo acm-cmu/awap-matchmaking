@@ -1,25 +1,27 @@
 name: remote ssh command
 on: [push, workflow_dispatch]
 jobs:
-
   build:
     name: Build
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     steps:
-    - name: executing remote ssh commands using password
-      uses: appleboy/ssh-action@v0.1.7
-      with:
-        host: ${{ secrets.HOST }}
-        username: ${{ secrets.USERNAME }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        port: 22
-        script: |
+      - name: executing remote ssh commands using password
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
             source ./matchmaking/bin/activate
             cd awap-matchmaking
             PID_FASTAPI=$(lsof -i:8000 -t)
             kill -9 $PID_FASTAPI
             git pull
             sudo docker compose up -d
-            ./run-fastapi.sh 52.23.23.233 & 
-
-          
+            DATE=$(date -Iseconds)
+            mkdir -p logs
+            STDOUT_LOG="logs/stdout-$(DATE).log"
+            STDERR_LOG="logs/stderr-$(DATE).log"
+            ./run-fastapi.sh 52.23.23.233 > $STDOUT_LOG 2> $STDERR_LOG &
