@@ -1,6 +1,4 @@
-import json
 import os
-from socket import socket
 import sys
 from time import time_ns
 from typing import Optional, Union, overload
@@ -16,11 +14,11 @@ from server.match_runner import Match, MatchRunner, MatchType, UserSubmission
 from server.storage_handler import StorageHandler, MatchTableSchema
 from server.tango import TangoInterface
 from server.ranked_game_runner import (
+    OngoingRankedMatchTable,
     RankedGameRunner,
-    RankedScrimmageTableEntry,
     RankedScrimmages,
 )
-from server.tournament_runner import TournamentRunner, Tournament
+from server.tournament_runner import OngoingTourneyTable, TournamentRunner, Tournament
 from util import AtomicCounter
 
 
@@ -36,7 +34,8 @@ class API(FastAPI):
     tango: TangoInterface
 
     ongoing_batch_match_runners_table: dict[int, dict[int, int]]
-    scrimmage_table: dict[int, RankedScrimmageTableEntry]
+    scrimmage_table: dict[int, OngoingRankedMatchTable]
+    tourney_table: dict[int, OngoingTourneyTable]
     match_counter: AtomicCounter
 
     def __init__(self):
@@ -61,6 +60,7 @@ class API(FastAPI):
 
         self.ongoing_batch_match_runners_table = {}
         self.scrimmage_table = {}
+        self.tourney_table = {}
 
 
 app = API()
@@ -277,7 +277,7 @@ def run_scrimmage(ranked_scrimmages: RankedScrimmages):
 
     scrimmage_id = time_ns()
 
-    app.scrimmage_table[scrimmage_id] = RankedScrimmageTableEntry()
+    app.scrimmage_table[scrimmage_id] = OngoingRankedMatchTable()
 
     try:
         rankedGameRunner = RankedGameRunner(
@@ -323,7 +323,7 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
-        app.scrimmage_table[scrimmage_id].run_callback(match_id, winner, dest_filename)
+        app.scrimmage_table[scrimmage_id](match_id, winner, dest_filename)
 
     except Exception as exc:
         storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
@@ -360,11 +360,13 @@ def run_tournament(tournament: Tournament):
         raise HTTPException(status_code=400, detail="Incompatible game engine")
 
     tournament_id = time_ns()
+    app.tourney_table[tournament_id] = OngoingTourneyTable()
+
     rankedGameRunner = TournamentRunner(
         app.dynamodb_resource,
         app.match_counter,
         tournament_id,
-        app.ongoing_batch_match_runners_table,
+        app.tourney_table[tournament_id],
         dict(
             makefile=app.makefile,
             engine=app.engine_filename,
@@ -400,8 +402,9 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
-        app.ongoing_batch_match_runners_table[tournament_id][match_id] = winner
+        app.tourney_table[tournament_id](match_id, winner, dest_filename)
     except Exception as exc:
+        print(str(exc))
         storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
-        app.ongoing_batch_match_runners_table[tournament_id][match_id] = -1
+        app.tourney_table[tournament_id](match_id, -1, "")
         raise HTTPException(status_code=400, detail="Bad tango output") from exc
