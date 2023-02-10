@@ -326,7 +326,6 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
         app.scrimmage_table[scrimmage_id].run_callback(match_id, winner, dest_filename)
 
     except Exception as exc:
-        app.ongoing_batch_match_runners_table[scrimmage_id][match_id] = -1
         storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
         print(file, file=sys.stderr)
         raise HTTPException(status_code=400, detail="Malformed tango output") from exc
