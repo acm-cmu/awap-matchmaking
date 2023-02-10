@@ -20,9 +20,6 @@ jobs:
             kill -9 $PID_FASTAPI
             git pull
             sudo docker compose up -d
-            DATE=$(date -Iseconds)
             source .env
-            mkdir -p logs
-            STDOUT_LOG="logs/stdout-$(DATE).log"
-            STDERR_LOG="logs/stderr-$(DATE).log"
-            ./run-fastapi.sh $(TANGO_HOSTNAME) > $STDOUT_LOG 2> $STDERR_LOG &
+            pip install -r requirements.txt
+            ./with-logging.sh ./run-fastapi $TANGO_HOSTNAME
