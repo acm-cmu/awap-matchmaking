@@ -21,7 +21,8 @@ jobs:
             git pull
             sudo docker compose up -d
             DATE=$(date -Iseconds)
+            source .env
             mkdir -p logs
             STDOUT_LOG="logs/stdout-$(DATE).log"
             STDERR_LOG="logs/stderr-$(DATE).log"
-            ./run-fastapi.sh ***REMOVED*** > $STDOUT_LOG 2> $STDERR_LOG &
+            ./run-fastapi.sh $(TANGO_HOSTNAME) > $STDOUT_LOG 2> $STDERR_LOG &
