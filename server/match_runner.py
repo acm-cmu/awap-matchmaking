@@ -108,9 +108,7 @@ class MatchRunner:
                 config_f.write(self.game_map)
             self.files_param.append(self.uploadFile(config_path))
 
-        callback_url = (
-            f"http://{self.fastapi_host}/{self.callback_endpoint}/{self.match_id}"
-        )
+        callback_url = f"{self.fastapi_host}/{self.callback_endpoint}/{self.match_id}"
         output_file = f"output-{self.match_id}.json"
 
         # insert pending job into match table and return job id
