@@ -132,8 +132,8 @@ class MatchRunner:
 
     @staticmethod
     def get_match_players_info(dynamodb_table, players: list[UserSubmission]):
-        table_username_key = "tid"
-        table_rating_column_name = "RATING"
+        table_username_key = "team_name"
+        table_rating_column_name = "current_rating"
 
         match_player_info = []
         for user in players:
