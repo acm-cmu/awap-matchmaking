@@ -124,8 +124,8 @@ class StorageHandler:
         for team_name, new_elo in new_elos.items():
             try:
                 curr_player_table.update_item(
-                    Key={"tid": team_name},
-                    UpdateExpression="set RATING=:r",
+                    Key={"team_name": team_name},
+                    UpdateExpression="set current_rating=:r",
                     ExpressionAttributeValues={":r": new_elo},
                 )
             except Exception as e:

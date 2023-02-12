@@ -93,8 +93,9 @@ class OngoingRankedMatchTable:
         self.post_match_callbacks = {}
 
     def __call__(self, match_id: int, winner: int, replay_name: str) -> None:
+        if winner != -1:
+            self.post_match_callbacks[match_id](winner, replay_name)
         self.semaphore.release()
-        self.post_match_callbacks[match_id](winner, replay_name)
 
 
 class RankedGameRunner:
@@ -227,6 +228,8 @@ class RankedGameRunner:
             )
             self.scrimmage_entry.register(currMatch.match_id, post_match_callback)
             currMatch.sendJob()
+
+        print("waiting for matches to finish")
 
         for _ in matches:
             self.scrimmage_entry.semaphore.acquire()

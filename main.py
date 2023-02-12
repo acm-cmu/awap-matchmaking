@@ -331,6 +331,8 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
 
     except Exception as exc:
         storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
+        app.scrimmage_table[scrimmage_id](match_id, -1, "")
+        print(str(exc), file=sys.stderr)
         print(file, file=sys.stderr)
         raise HTTPException(status_code=400, detail="Malformed tango output") from exc
 
@@ -408,7 +410,8 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
         winner = storageHandler.process_replay(file, dest_filename)
         app.tourney_table[tournament_id](match_id, winner, dest_filename)
     except Exception as exc:
-        print(str(exc))
         storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
         app.tourney_table[tournament_id](match_id, -1, "")
+        print(str(exc), file=sys.stderr)
+        print(file, file=sys.stderr)
         raise HTTPException(status_code=400, detail="Bad tango output") from exc
