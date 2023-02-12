@@ -40,6 +40,7 @@ class TourneyPairUpRunner:
     p1wins: int
     p2wins: int
     replayLocs: list[str]
+    matchWinners: list[int]
 
     def __init__(
         self,
@@ -73,6 +74,7 @@ class TourneyPairUpRunner:
         self.p1wins = 0
         self.p2wins = 0
         self.replayLocs = []
+        self.matchWinners = []
 
     def __call__(self, winner: int, replay: str) -> None:
         if winner == 1:
@@ -80,6 +82,8 @@ class TourneyPairUpRunner:
         elif winner == 2:
             self.p2wins += 1
         else:
+            self.replayLocs.append("failed")
+            self.matchWinners.append(-1)
             self.semaphore.release()
             return
 
@@ -94,7 +98,8 @@ class TourneyPairUpRunner:
             ),
         )
 
-        self.replayLocs.append(replay)
+        self.replayLocs.append(replay_url)
+        self.matchWinners.append(winner)
         self.semaphore.release()
 
     def start(self) -> tuple[dict[str, Any], MatchPlayer]:
@@ -110,32 +115,25 @@ class TourneyPairUpRunner:
                 "replay_filename": [],
             }, actual_player
 
-        num_matches = len(self.maps)
-        num_wins_req = num_matches // 2 + 1
-
         self.p1wins = 0
         self.p2wins = 0
         self.semaphore = Semaphore(0)
         self.replayLocs = []
-        map_idx = 0
+        self.matchWinners = []
 
-        while (
-            map_idx < num_matches
-            and self.p1wins < num_wins_req
-            and self.p2wins < num_wins_req
-        ):
-            match = self.create_match(self.p1, self.p2, self.maps[map_idx])
-            map_idx += 1
+        for match_map in self.maps:
+            match = self.create_match(self.p1, self.p2, match_map)
             self.parent.register(match.match_id, self)
             match.sendJob()
             self.semaphore.acquire()
 
-        winner = self.p1 if self.p1wins > self.p2wins else self.p2
+        winner = self.p1 if self.p1wins >= self.p2wins else self.p2
         return {
             "player1": self.p1.user_info.username,
             "player2": self.p2.user_info.username,
-            "winner": winner.user_info.username,
+            "overall_winner": winner.user_info.username,
             "replay_filename": self.replayLocs,
+            "map_winners": self.matchWinners,
         }, winner
 
     def create_match(

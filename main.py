@@ -36,7 +36,9 @@ class API(FastAPI):
     ongoing_batch_match_runners_table: dict[int, dict[int, int]]
     scrimmage_table: dict[int, OngoingRankedMatchTable]
     tourney_table: dict[int, OngoingTourneyTable]
+
     match_counter: AtomicCounter
+    tourney_counter: AtomicCounter
 
     def __init__(self):
         super().__init__()
@@ -61,6 +63,8 @@ class API(FastAPI):
         self.ongoing_batch_match_runners_table = {}
         self.scrimmage_table = {}
         self.tourney_table = {}
+
+        self.tourney_counter = AtomicCounter(1)
 
 
 app = API()
@@ -298,7 +302,7 @@ def run_scrimmage(ranked_scrimmages: RankedScrimmages):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return scrimmage_id
+    return {"scrimmage_id": scrimmage_id}
 
 
 @app.post("/scrimmage_callback/{scrimmage_id}/{match_id}")
@@ -377,7 +381,7 @@ def run_tournament(tournament: Tournament):
         app.maps.tourney_map_order,
     )
     rankedGameRunner.run_tournament(tournament)
-    return tournament_id
+    return {"tournament_id": tournament_id}
 
 
 @app.post("/tournament_callback/{tournament_id}/{match_id}")

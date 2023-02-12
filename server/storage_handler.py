@@ -61,7 +61,9 @@ class StorageHandler:
             )
 
     def upload_tournament_bracket(
-        self, tournament_id: int, tournament_bracket: list[list[dict[str, str]]]
+        self,
+        tournament_id: int,
+        tournament_bracket: list[list[dict[str, str | list[str]]]],
     ):
         json_object = json.dumps(tournament_bracket)
         dest_filename = f"tournament_bracket-{tournament_id}.json"
@@ -72,7 +74,7 @@ class StorageHandler:
             with open(local_path, "w") as outfile:
                 outfile.write(json_object)
             self.s3.upload_file(
-                local_path, os.environ["AWS_REPLAY_BUCKET_NAME"], dest_filename
+                local_path, os.environ["AWS_TOURNEY_BUCKET_NAME"], dest_filename
             )
 
     # DEPRECATED
