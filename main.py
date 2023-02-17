@@ -257,7 +257,7 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
     """
     print("match_id: ", match_id)
     print("file_size:", len(file))
-    dest_filename = f"unranked-{match_id}.json"
+    dest_filename = f"unranked-{match_id}.awap23r"
     storageHandler = StorageHandler(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
@@ -345,7 +345,7 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
     Parses the results and put the winner into the "ongoing_tournaments" dict
     """
     print("received scrimmage callback for match_id: ", match_id)
-    dest_filename = f"ranked_scrimmage-{match_id}.json"
+    dest_filename = f"ranked_scrimmage-{match_id}.awap23r"
     storageHandler = StorageHandler(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
@@ -427,7 +427,7 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
     Parses the results and put the winner into the "ongoing_tournaments" dict
     """
     print("received tournament callback for match_id: ", match_id)
-    dest_filename = f"tournament-{match_id}.json"
+    dest_filename = f"tournament-{match_id}.awap23r"
     storageHandler = StorageHandler(
         s3_resource=app.s3_resource, dynamodb_resource=app.dynamodb_resource
     )
