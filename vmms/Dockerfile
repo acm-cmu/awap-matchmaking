@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
   make \
   sudo \
   python3.9 \
+  python3-pip \
   && rm -rf /var/lib/apt/lists/*
 
 # Install autodriver
@@ -33,3 +34,5 @@ RUN apt-get remove -y git && apt-get -y autoremove && rm -rf Tango/
 # Check installation
 RUN ls -l /home
 RUN which autodriver
+
+RUN pip3 install numpy
