@@ -1,22 +1,22 @@
-autograde: replay/replay.awap23r 
+autograde: out.awap23r 
 	@echo "====== BEGIN REPLAY HERE ======"
-	@cat replay/replay.awap23r
+	@cat out.awap23r
+	@echo ""
 	@echo "====== END REPLAY HERE ======"
 
 .PHONY:
 assets:
 	tar xfz engine.tar.gz
-	mkdir -p bots replay maps
+	mkdir -p bots replays maps
 	cp team1.py team2.py bots
 
-replay/replay.awap23r: assets
-	python3 run_game.py -f config.json -sb -sr > /dev/null
-	find replay -f "*.awap23r" -exec mv {} replay/replay.awap23r \;
-	mv replay/team1-team2.json team
+out.awap23r: assets
+	python3 run_game.py -f config.json -sb -sr
+	find replays -type f -name "*.awap23r" -exec mv {} $@ \;
 
 .PHONY:
 clean-replays:
-	rm -rf replay
+	rm -rf replays
 
 .PHONY:
 clean: clean-replays
