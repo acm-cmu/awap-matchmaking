@@ -9,7 +9,13 @@ from pydantic import BaseModel, BaseSettings
 import boto3
 from dotenv import load_dotenv
 
-from server.game_engine import GameEngine, MapSelection, choose_map, setup_game_engine
+from server.game_engine import (
+    GameEngine,
+    MapSelection,
+    choose_map,
+    download_game_engine,
+    reload_game_engine,
+)
 from server.match_runner import Match, MatchRunner, MatchType, UserSubmission
 from server.storage_handler import StorageHandler, MatchTableSchema
 from server.tango import TangoInterface
@@ -122,7 +128,7 @@ def set_game_engine(new_engine: GameEngine):
     these files as the currently running game engine.
     """
     try:
-        local_engine_path, local_makefile_path = setup_game_engine(
+        local_engine_path, local_makefile_path = download_game_engine(
             new_engine, app.temp_file_dir
         )
     except ConnectionError as exc:
@@ -133,7 +139,25 @@ def set_game_engine(new_engine: GameEngine):
         raise HTTPException(
             status_code=500, detail=f"Could not save engine: {str(exc)}"
         ) from exc
+    return setup_game_engine(new_engine, local_engine_path, local_makefile_path)
 
+
+@app.post("/game_engine_reload")
+def reuse_game_engine():
+    try:
+        engine, local_engine_path, local_makefile_path = reload_game_engine(
+            app.temp_file_dir
+        )
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Could not reload engine: {str(exc)}"
+        ) from exc
+    return setup_game_engine(engine, local_engine_path, local_makefile_path)
+
+
+def setup_game_engine(
+    new_engine: GameEngine, local_engine_path: str, local_makefile_path: str
+):
     app.engine = new_engine
     tango_engine_name = f"{new_engine.engine_filename}"
     app.engine_filename = app.tango.upload_file(

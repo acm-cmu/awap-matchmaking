@@ -1,3 +1,4 @@
+import json
 import os
 import random
 
@@ -5,6 +6,9 @@ from pydantic import BaseModel
 import requests
 
 from server.match_runner import MatchType
+
+
+persistent = "engine-persistent.json"
 
 
 class MapSelection(BaseModel):
@@ -23,7 +27,7 @@ class GameEngine(BaseModel):
     map_choice: MapSelection
 
 
-def setup_game_engine(game_engine: GameEngine, data_dir: str):
+def download_game_engine(game_engine: GameEngine, data_dir: str):
     """
     Downloads the game engine and associated makefile
 
@@ -41,7 +45,27 @@ def setup_game_engine(game_engine: GameEngine, data_dir: str):
         response.raise_for_status()
         file.write(response.content)
 
+    persistent_path = os.path.join(data_dir, persistent)
+    with open(persistent_path, "w", encoding="utf-8") as file:
+        persistent_save = dict(
+            engine_path=engine_path,
+            makefile_path=makefile_path,
+            engine_details=game_engine.dict(),
+        )
+        json.dump(persistent_save, file)
+
     return engine_path, makefile_path
+
+
+def reload_game_engine(data_dir: str):
+    persistent_path = os.path.join(data_dir, persistent)
+    with open(persistent_path, "r", encoding="utf-8") as file:
+        contents = json.load(file)
+        engine_path = contents["engine_path"]
+        makefile_path = contents["makefile_path"]
+        engine = GameEngine.parse_obj(contents["engine_details"])
+    print(engine)
+    return engine, engine_path, makefile_path
 
 
 def choose_map(map_selection: MapSelection, match_type: MatchType) -> str:
