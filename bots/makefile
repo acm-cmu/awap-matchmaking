@@ -10,7 +10,7 @@ assets:
 	cp team1.py team2.py bots
 
 replay/replay.json: assets
-	python3 run_game.py $(shell cat config.txt | xargs) team1 team2 -r > $@
+	python3 run_game.py $(shell cat config.txt | xargs) team1 team2 -r -sb -sr > $@
 
 .PHONY:
 clean-replays:
