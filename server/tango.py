@@ -71,7 +71,7 @@ class TangoInterface:
                 "files": files,
                 "output_file": output_filename,
                 "callback_url": callback_url,
-                "timeout": 30,
+                "timeout": 600,
             }
             response = requests.post(
                 f"{self.tango_host}/addJob/{self.key}/{self.COURSELAB}/",
