@@ -49,7 +49,19 @@ This project uses python3 and virtualenv to manage a separate python environment
 
    - `AWS_PLAYER_TABLE_NAME`
 
-     This is the table on dynamoDB on AWS that stores player info (team name, rating, ...)
+     This is the table on dynamoDB on AWS that stores player info with ratings (team name, rating, ...)
+
+   - `AWS_MATCH_TABLE_NAME`
+
+     This is the table on dynamoDB on AWS that stores details of each match.
+
+   - `AWS_TOURNEY_BUCKET_NAME`
+
+     This is the table on s3 that tournament brackets are uploaded to.
+
+   - `AWS_ERRLOGS_BUCKET_NAME`
+
+     This is the table on s3 that error logs are uploaded to.
 
    The other settings may be edited as necessary.
 
@@ -131,6 +143,13 @@ body:
         ]
     }
 }
+```
+
+The following endpoint allows the most recent game engine to be loaded from disk. Useful for persisting state after a server restart.
+
+```
+POST: http://localhost:8000/game_engine_reload
+body: No body
 ```
 
 The makefile should contain the commands used to run the game. It is executed every time a match is run (so it should include commands such as `python3 run_game_file.py`, for example). An example game `simple.py` and `autograde-Makefile` are on S3 (maybe).
