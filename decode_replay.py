@@ -9,3 +9,6 @@ def parse_tango_output(file: bytes):
             return lines[i + 1]
 
     raise Exception("bad replay")
+
+def parse_failed_output(file: bytes):
+    return file.decode("utf-8")

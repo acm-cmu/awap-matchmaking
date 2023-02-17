@@ -3,7 +3,7 @@ import json
 import tempfile
 from datetime import datetime
 
-from decode_replay import parse_tango_output
+from decode_replay import parse_tango_output, parse_failed_output
 
 # fields can sometime be left empty / unused, depending on what fields need to be accessed/updated in database
 class MatchTableSchema:
@@ -104,6 +104,18 @@ class StorageHandler:
 
         return winner
 
+    def process_failed_replay(self, tango_output: bytes, dest_filename: str) -> int:
+        """
+        Uploads a failed replay to s3 error bucket
+        """
+        decoded = parse_failed_output(tango_output)
+        with tempfile.NamedTemporaryFile(mode="w") as replay_file:
+            replay_file.write(decoded)
+            self.s3.upload_file(
+                replay_file.name, os.environ["AWS_ERRLOGS_BUCKET_NAME"], dest_filename
+            )
+        return 0
+        
     def get_replay_url(self, dest_filename: str, expiry_seconds: int = 43200) -> str:
         """
         Gets a temporary URL which can be used to access the replay.
