@@ -88,7 +88,7 @@ class MatchRunner:
         with_id = f"{self.match_id}-{filename}"
         return self.tango.upload_file(pathname, with_id, filename)
 
-    def sendJob(self, first_player=None):
+    def sendJob(self):
         """
         Send the job to the match runner by calling Tango API
         You would likely need to download the user submissions from the remote location
@@ -113,8 +113,8 @@ class MatchRunner:
             config_path = os.path.join(tempdir, "config.json")
             config = dict(
                 map=self.game_map,
-                blue_bot=f"team{first_player}",
-                red_bot=f"team{3-first_player}",
+                red_bot="team1",
+                blue_bot="team2",
             )
 
             with open(config_path, "w", encoding="utf-8") as config_f:

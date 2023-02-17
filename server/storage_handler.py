@@ -115,7 +115,7 @@ class StorageHandler:
                 replay_file.name, os.environ["AWS_ERRLOGS_BUCKET_NAME"], dest_filename
             )
         return 0
-        
+
     def get_replay_url(self, dest_filename: str, expiry_seconds: int = 43200) -> str:
         """
         Gets a temporary URL which can be used to access the replay.
