@@ -1,5 +1,6 @@
 from enum import Enum
 import json
+import random
 import tempfile
 import time
 from fastapi import HTTPException
@@ -87,7 +88,7 @@ class MatchRunner:
         with_id = f"{self.match_id}-{filename}"
         return self.tango.upload_file(pathname, with_id, filename)
 
-    def sendJob(self):
+    def sendJob(self, first_player=None):
         """
         Send the job to the match runner by calling Tango API
         You would likely need to download the user submissions from the remote location
@@ -104,8 +105,17 @@ class MatchRunner:
                 )
                 self.files_param.append(self.uploadFile(local_path))
 
+            if first_player == None:
+                first_player = random.choice([1, 2])
+
+            assert first_player in (1, 2)
+
             config_path = os.path.join(tempdir, "config.json")
-            config = {"map": self.game_map, "blue_bot": "team1", "red_bot": "team2"}
+            config = dict(
+                map=self.game_map,
+                blue_bot=f"team{first_player}",
+                red_bot=f"team{3-first_player}",
+            )
 
             with open(config_path, "w", encoding="utf-8") as config_f:
                 json.dump(config, config_f)
