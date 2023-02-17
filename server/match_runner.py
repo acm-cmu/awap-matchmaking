@@ -105,11 +105,6 @@ class MatchRunner:
                 )
                 self.files_param.append(self.uploadFile(local_path))
 
-            if first_player == None:
-                first_player = random.choice([1, 2])
-
-            assert first_player in (1, 2)
-
             config_path = os.path.join(tempdir, "config.json")
             config = dict(
                 map=self.game_map,
