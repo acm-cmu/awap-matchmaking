@@ -1,4 +1,5 @@
 from enum import Enum
+import json
 import tempfile
 import time
 from fastapi import HTTPException
@@ -103,9 +104,12 @@ class MatchRunner:
                 )
                 self.files_param.append(self.uploadFile(local_path))
 
-            config_path = os.path.join(tempdir, "config.txt")
+            config_path = os.path.join(tempdir, "config.json")
+            config = {"map": self.game_map, "blue_bot": "team1", "red_bot": "team2"}
+
             with open(config_path, "w", encoding="utf-8") as config_f:
-                config_f.write(self.game_map)
+                json.dump(config, config_f)
+
             self.files_param.append(self.uploadFile(config_path))
 
         callback_url = f"{self.fastapi_host}/{self.callback_endpoint}/{self.match_id}"
