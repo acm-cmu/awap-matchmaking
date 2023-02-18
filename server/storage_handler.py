@@ -129,6 +129,19 @@ class StorageHandler:
             ExpiresIn=expiry_seconds,
         )
 
+    def get_errlog_url(self, dest_filename: str, expiry_seconds: int = 43200) -> str:
+        """
+        Gets a temporary URL which can be used to access the replay.
+        """
+        return self.s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": os.environ["AWS_ERRLOGS_BUCKET_NAME"],
+                "Key": dest_filename,
+            },
+            ExpiresIn=expiry_seconds,
+        )
+
     def adjust_elo_table(self, new_elos: dict[str, int]):
         curr_player_table = self.dynamodb_resource.Table(
             os.environ["AWS_PLAYER_TABLE_NAME"]
@@ -198,10 +211,11 @@ class StorageHandler:
         try:
             curr_match_table.update_item(
                 Key={"MATCH_ID": match_info.match_id},
-                UpdateExpression="set MATCH_STATUS=:s, LAST_UPDATED=:t",
+                UpdateExpression="set MATCH_STATUS=:s, LAST_UPDATED=:t, REPLAY_URL=:u",
                 ExpressionAttributeValues={
                     ":s": "failed",
                     ":t": datetime.today().isoformat(),
+                    ":u": match_info.replay_url,
                 },
             )
         except Exception as e:

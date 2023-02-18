@@ -274,9 +274,13 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
             )
         )
     except Exception as exc:
-        storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
         print(file.decode("utf-8"), file=sys.stderr)
-        storageHandler.process_failed_replay(file, "failed-" + dest_filename)
+        errlog_name = "failed-" + dest_filename
+        storageHandler.process_failed_replay(file, errlog_name)
+        temp_url = storageHandler.get_errlog_url(errlog_name)
+        storageHandler.update_failed_match_in_table(
+            MatchTableSchema(match_id, replay_url=temp_url)
+        )
         raise HTTPException(status_code=400, detail="Bad replay from tango") from exc
 
 
@@ -356,10 +360,15 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
 
     except Exception as exc:
         storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
+        errlog_name = "failed-" + dest_filename
+        storageHandler.process_failed_replay(file, errlog_name)
+        temp_url = storageHandler.get_errlog_url(errlog_name)
         app.scrimmage_table[scrimmage_id](match_id, -1, "")
         print(str(exc), file=sys.stderr)
         print(file.decode("utf-8"), file=sys.stderr)
-        storageHandler.process_failed_replay(file, "failed-" + dest_filename)
+        storageHandler.update_failed_match_in_table(
+            MatchTableSchema(match_id, replay_url=temp_url)
+        )
         raise HTTPException(status_code=400, detail="Malformed tango output") from exc
 
 
@@ -440,5 +449,10 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
         app.tourney_table[tournament_id](match_id, -1, "")
         print(str(exc), file=sys.stderr)
         print(file.decode("utf-8"), file=sys.stderr)
-        storageHandler.process_failed_replay(file, "failed-" + dest_filename)
+        errlog_name = "failed-" + dest_filename
+        storageHandler.process_failed_replay(file, errlog_name)
+        temp_url = storageHandler.get_errlog_url(errlog_name)
+        storageHandler.update_failed_match_in_table(
+            MatchTableSchema(match_id, replay_url=temp_url)
+        )
         raise HTTPException(status_code=400, detail="Bad tango output") from exc
