@@ -35,4 +35,4 @@ RUN apt-get remove -y git && apt-get -y autoremove && rm -rf Tango/
 RUN ls -l /home
 RUN which autodriver
 
-RUN pip3 install numpy
+RUN pip3 install numpy scipy

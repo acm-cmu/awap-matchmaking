@@ -97,9 +97,11 @@ class MatchRunner:
         You will likely need the requests library to call the Tango API
         Tango API https://docs.autolabproject.com/tango-rest/
         """
+        teams: list[str] = []
         with tempfile.TemporaryDirectory() as tempdir:
-            for i, submission in enumerate(self.match.user_submissions):
-                local_path = os.path.join(tempdir, f"team{i+1}.py")
+            for submission in self.match.user_submissions:
+                teams.append(f"team_{submission.username}.py")
+                local_path = os.path.join(tempdir, teams[-1])
                 self.s3.download_file(
                     submission.s3_bucket_name, submission.s3_object_name, local_path
                 )
@@ -108,8 +110,8 @@ class MatchRunner:
             config_path = os.path.join(tempdir, "config.json")
             config = dict(
                 map=self.game_map,
-                red_bot="team1",
-                blue_bot="team2",
+                red_bot=teams[0][:-3],
+                blue_bot=teams[1][:-3],
             )
 
             with open(config_path, "w", encoding="utf-8") as config_f:
