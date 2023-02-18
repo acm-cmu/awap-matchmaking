@@ -4,6 +4,14 @@ import sys
 header = "====== BEGIN REPLAY HERE ======"
 
 
+class FailedReplayException(Exception):
+    lines: list[str]
+
+    def __init__(self, lines: list[str]) -> None:
+        super().__init__()
+        self.lines = lines
+
+
 def parse_tango_output(file: bytes):
     decoded = file.decode("utf-8")
     lines = decoded.splitlines()
@@ -11,7 +19,7 @@ def parse_tango_output(file: bytes):
         if line == header:
             return lines[i + 1]
 
-    raise Exception("bad replay")
+    raise FailedReplayException(lines)
 
 
 def normalize_output(winner: int, filename: str) -> tuple[int, str]:
@@ -23,3 +31,18 @@ def normalize_output(winner: int, filename: str) -> tuple[int, str]:
 
 def parse_failed_output(file: bytes):
     return file.decode("utf-8")
+
+
+def make_errlog_name(filename: str):
+    return "failed-" + filename.replace("awap23r", "log")
+
+
+def handle_exception(exc: Exception, storageHandler, filename, file):
+    if isinstance(exc, FailedReplayException):
+        storageHandler.process_failed_replay(exc.lines, filename)
+        print(exc.lines, file=sys.stderr)
+    else:
+        storageHandler.process_failed_binary(file, filename)
+        print(file.decode(), file=sys.stderr)
+    print(str(exc), file=sys.stderr)
+    return storageHandler.get_errlog_url(filename)

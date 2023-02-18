@@ -104,13 +104,20 @@ class StorageHandler:
 
         return winner
 
-    def process_failed_replay(self, tango_output: bytes, dest_filename: str) -> int:
+    def process_failed_replay(self, lines: list[str], dest_filename: str) -> int:
         """
         Uploads a failed replay to s3 error bucket
         """
-        decoded = parse_failed_output(tango_output)
         with tempfile.NamedTemporaryFile(mode="w") as replay_file:
-            replay_file.write(decoded)
+            replay_file.write("\n".join(lines))
+            self.s3.upload_file(
+                replay_file.name, os.environ["AWS_ERRLOGS_BUCKET_NAME"], dest_filename
+            )
+        return 0
+
+    def process_failed_binary(self, file: bytes, dest_filename: str):
+        with tempfile.NamedTemporaryFile(mode="wb") as replay_file:
+            replay_file.write(file)
             self.s3.upload_file(
                 replay_file.name, os.environ["AWS_ERRLOGS_BUCKET_NAME"], dest_filename
             )

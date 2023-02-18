@@ -2,7 +2,12 @@ import os
 import sys
 from time import time_ns
 from typing import Optional, Union, overload
-from decode_replay import parse_tango_output
+from decode_replay import (
+    FailedReplayException,
+    handle_exception,
+    make_errlog_name,
+    parse_tango_output,
+)
 
 from fastapi import FastAPI, HTTPException, Response, status, File
 from pydantic import BaseModel, BaseSettings
@@ -274,10 +279,8 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
             )
         )
     except Exception as exc:
-        print(file.decode("utf-8"), file=sys.stderr)
-        errlog_name = "failed-" + dest_filename
-        storageHandler.process_failed_replay(file, errlog_name)
-        temp_url = storageHandler.get_errlog_url(errlog_name)
+        errlog_name = make_errlog_name(dest_filename)
+        temp_url = handle_exception(exc, storageHandler, errlog_name, file)
         storageHandler.update_failed_match_in_table(
             MatchTableSchema(match_id, replay_url=temp_url)
         )
@@ -357,15 +360,10 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
     try:
         winner = storageHandler.process_replay(file, dest_filename)
         app.scrimmage_table[scrimmage_id](match_id, winner, dest_filename)
-
     except Exception as exc:
-        storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
-        errlog_name = "failed-" + dest_filename
-        storageHandler.process_failed_replay(file, errlog_name)
-        temp_url = storageHandler.get_errlog_url(errlog_name)
         app.scrimmage_table[scrimmage_id](match_id, -1, "")
-        print(str(exc), file=sys.stderr)
-        print(file.decode("utf-8"), file=sys.stderr)
+        errlog_name = make_errlog_name(dest_filename)
+        temp_url = handle_exception(exc, storageHandler, errlog_name, file)
         storageHandler.update_failed_match_in_table(
             MatchTableSchema(match_id, replay_url=temp_url)
         )
@@ -445,14 +443,10 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
         winner = storageHandler.process_replay(file, dest_filename)
         app.tourney_table[tournament_id](match_id, winner, dest_filename)
     except Exception as exc:
-        storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
         app.tourney_table[tournament_id](match_id, -1, "")
-        print(str(exc), file=sys.stderr)
-        print(file.decode("utf-8"), file=sys.stderr)
-        errlog_name = "failed-" + dest_filename
-        storageHandler.process_failed_replay(file, errlog_name)
-        temp_url = storageHandler.get_errlog_url(errlog_name)
+        errlog_name = make_errlog_name(dest_filename)
+        temp_url = handle_exception(exc, storageHandler, errlog_name, file)
         storageHandler.update_failed_match_in_table(
             MatchTableSchema(match_id, replay_url=temp_url)
         )
-        raise HTTPException(status_code=400, detail="Bad tango output") from exc
+        raise HTTPException(status_code=400, detail="Bad replay from tango") from exc

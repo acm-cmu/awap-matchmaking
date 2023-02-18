@@ -93,7 +93,7 @@ class OngoingRankedMatchTable:
         self.post_match_callbacks = {}
 
     def __call__(self, match_id: int, winner: int, replay_name: str) -> None:
-        if winner != -1:
+        if winner > 0:
             self.post_match_callbacks[match_id](winner, replay_name)
         self.semaphore.release()
 
