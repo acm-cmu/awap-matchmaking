@@ -289,11 +289,21 @@ class TournamentRunner:
                 for i in range(0, len(curr_tournament_layer), 2)
             ]
 
-            results = list(
+            raw_results = list(
                 ThreadPoolExecutor(16).map(TourneyPairUpRunner.start, pairups)
             )
 
+            results = []
+
+            if len(raw_results) > 1:
+                for i in range(len(raw_results) // 2):
+                    results.append(raw_results[i])
+                    results.append(raw_results[len(raw_results) - i - 1])
+            else:
+                results = raw_results
+
             curr_tournament_layer = [winner for (_, winner) in results]
+
             complete_tournament_results.append([r for (r, _) in results])
             layer += 1
 
