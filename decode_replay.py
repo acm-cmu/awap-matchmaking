@@ -1,3 +1,6 @@
+import sys
+
+
 header = "====== BEGIN REPLAY HERE ======"
 
 red_broken = "===== RED BROKEN ====="
@@ -20,6 +23,7 @@ def parse_tango_output(file: bytes) -> str | int:
 
 def normalize_output(winner: int, filename: str) -> tuple[int, str]:
     if winner < 0:
+        print("Won by default", file=sys.stderr)
         return (-winner, "")
     return (winner, filename)
 

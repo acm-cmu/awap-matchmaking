@@ -87,9 +87,10 @@ class StorageHandler:
         Parses the replay file, uploads it and returns the winner
         """
         replay_line = parse_tango_output(tango_output)
-        if isinstance(replay_line, int):
+        if replay_line == -1 or replay_line == -2:
             return replay_line
 
+        replay_line = str(replay_line)
         replay = json.loads(replay_line)
 
         if replay["winner"] == "red":
