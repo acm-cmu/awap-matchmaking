@@ -2,7 +2,7 @@ import os
 import sys
 from time import time_ns
 from typing import Optional, Union, overload
-from decode_replay import parse_tango_output
+from decode_replay import normalize_output, parse_tango_output
 
 from fastapi import FastAPI, HTTPException, Response, status, File
 from pydantic import BaseModel, BaseSettings
@@ -264,6 +264,7 @@ def run_single_match_callback(match_id: int, file: bytes = File()):
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
+        winner, dest_filename = normalize_output(winner, dest_filename)
         temp_url = storageHandler.get_replay_url(dest_filename)
         storageHandler.update_finished_match_in_table(
             MatchTableSchema(
@@ -352,6 +353,7 @@ def run_scrimmage_callback(scrimmage_id: int, match_id: int, file: bytes = File(
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
+        winner, dest_filename = normalize_output(winner, dest_filename)
         app.scrimmage_table[scrimmage_id](match_id, winner, dest_filename)
 
     except Exception as exc:
@@ -434,6 +436,7 @@ def run_tournament_callback(tournament_id: int, match_id: int, file: bytes = Fil
 
     try:
         winner = storageHandler.process_replay(file, dest_filename)
+        winner, dest_filename = normalize_output(winner, dest_filename)
         app.tourney_table[tournament_id](match_id, winner, dest_filename)
     except Exception as exc:
         storageHandler.update_failed_match_in_table(MatchTableSchema(match_id))
