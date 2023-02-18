@@ -22,3 +22,7 @@ def normalize_output(winner: int, filename: str) -> tuple[int, str]:
     if winner < 0:
         return (-winner, "")
     return (winner, filename)
+
+
+def parse_failed_output(file: bytes):
+    return file.decode("utf-8")
