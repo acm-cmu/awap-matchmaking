@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 import tempfile
 from datetime import datetime
 
@@ -109,7 +110,9 @@ class StorageHandler:
         Uploads a failed replay to s3 error bucket
         """
         with tempfile.NamedTemporaryFile(mode="w") as replay_file:
-            replay_file.write("\n".join(lines))
+            output = "\n".join(lines)
+            print(output, file=sys.stderr)
+            replay_file.write(output)
             self.s3.upload_file(
                 replay_file.name, os.environ["AWS_ERRLOGS_BUCKET_NAME"], dest_filename
             )

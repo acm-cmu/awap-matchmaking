@@ -40,7 +40,7 @@ def make_errlog_name(filename: str):
 def handle_exception(exc: Exception, storageHandler, filename, file):
     if isinstance(exc, FailedReplayException):
         storageHandler.process_failed_replay(exc.lines, filename)
-        print(exc.lines, file=sys.stderr)
+        print(*exc.lines, file=sys.stderr)
     else:
         storageHandler.process_failed_binary(file, filename)
         print(file.decode(), file=sys.stderr)
