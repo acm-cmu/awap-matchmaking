@@ -8,7 +8,7 @@ autograde: out.awap23r
 assets:
 	tar xfz engine.tar.gz
 	mkdir -p bots replays maps
-	cp team_*.py bots
+	cp team1_*.py team2_*.py bots
 
 out.awap23r: assets
 	python3 run_game.py -f config.json -sb -sr
