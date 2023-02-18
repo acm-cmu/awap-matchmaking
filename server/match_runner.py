@@ -99,8 +99,8 @@ class MatchRunner:
         """
         teams: list[str] = []
         with tempfile.TemporaryDirectory() as tempdir:
-            for submission in self.match.user_submissions:
-                teams.append(f"team_{submission.username}.py")
+            for i, submission in enumerate(self.match.user_submissions):
+                teams.append(f"team{i + 1}_{submission.username}.py")
                 local_path = os.path.join(tempdir, teams[-1])
                 self.s3.download_file(
                     submission.s3_bucket_name, submission.s3_object_name, local_path
@@ -142,11 +142,13 @@ class MatchRunner:
         )
 
     @staticmethod
-    def get_match_players_info(dynamodb_table, players: list[UserSubmission]):
+    def get_match_players_info(
+        dynamodb_table, players: list[UserSubmission]
+    ) -> list[MatchPlayer]:
         table_username_key = "team_name"
         table_rating_column_name = "current_rating"
 
-        match_player_info = []
+        match_player_info: list[MatchPlayer] = []
         for user in players:
             try:
                 currPlayer = MatchPlayer(
