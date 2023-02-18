@@ -400,6 +400,7 @@ def run_tournament(tournament: Tournament):
 
     tournament_id = time_ns()
     app.tourney_table[tournament_id] = OngoingTourneyTable()
+    print("BRACKET: ", tournament.bracket)
 
     rankedGameRunner = TournamentRunner(
         app.dynamodb_resource,

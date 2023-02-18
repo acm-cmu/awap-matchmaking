@@ -18,6 +18,7 @@ from util import AtomicCounter
 
 
 class Tournament(BaseModel):
+    bracket: str
     user_submissions: list[UserSubmission]
     game_engine_name: str
     num_tournament_spots: int
@@ -128,6 +129,10 @@ class TourneyPairUpRunner:
             self.semaphore.acquire()
 
         winner = self.p1 if self.p1wins >= self.p2wins else self.p2
+        print(
+            f"Match completed: {self.p1.user_info.username} vs {self.p2.user_info.username} {self.p1wins}-{self.p2wins}"
+        )
+
         return {
             "player1": self.p1.user_info.username,
             "player2": self.p2.user_info.username,
@@ -237,7 +242,12 @@ class TournamentRunner:
     def tournament_worker_thread(
         self, tournament: Tournament, tournament_players: list[Optional[MatchPlayer]]
     ):
-        tournament_players = tournament_players[: tournament.num_tournament_spots]
+
+        print("=== TOURNAMENT SEED LIST ===:")
+        for i, player in enumerate(tournament_players):
+            if player is not None:
+                print(i + 1, player.user_info.username)
+        print("=== TOURNAMENT SEED DONE ===:")
 
         # pad the list of players with byes until power of 2
         while not self.is_pow_two(len(tournament_players)):
